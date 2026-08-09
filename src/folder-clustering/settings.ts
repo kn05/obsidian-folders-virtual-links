@@ -1,0 +1,29 @@
+import { App, PluginSettingTab, Setting } from "obsidian";
+import type FolderVirtualLinksPlugin from "../main";
+import type { TopologyDegree } from "./types";
+
+export class FolderVirtualLinksSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: FolderVirtualLinksPlugin) {
+    super(app, plugin);
+  }
+
+  override display(): void {
+    this.containerEl.empty();
+
+    new Setting(this.containerEl)
+      .setName("Folder topology degree")
+      .setDesc(
+        "3 is the balanced default. 4 adds a stronger folder pull. Native link strength and distance apply to both real and virtual links."
+      )
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("3", "3 (balanced)")
+          .addOption("4", "4 (stronger)")
+          .setValue(String(this.plugin.settings.topologyDegree))
+          .onChange(async (value) => {
+            const topologyDegree: TopologyDegree = value === "4" ? 4 : 3;
+            await this.plugin.updateTopologyDegree(topologyDegree);
+          });
+      });
+  }
+}
