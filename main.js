@@ -47,8 +47,8 @@ function convexHull(points) {
   const lower = [];
   for (const point of sorted) {
     while (lower.length >= 2) {
-      const origin = lower.at(-2);
-      const left = lower.at(-1);
+      const origin = lower[lower.length - 2];
+      const left = lower[lower.length - 1];
       if (origin === void 0 || left === void 0) break;
       if (cross(origin, left, point) > 0) break;
       lower.pop();
@@ -58,8 +58,8 @@ function convexHull(points) {
   const upper = [];
   for (const point of [...sorted].reverse()) {
     while (upper.length >= 2) {
-      const origin = upper.at(-2);
-      const left = upper.at(-1);
+      const origin = upper[upper.length - 2];
+      const left = upper[upper.length - 1];
       if (origin === void 0 || left === void 0) break;
       if (cross(origin, left, point) > 0) break;
       upper.pop();
@@ -667,19 +667,39 @@ var NativeGraphBridge = class {
     __publicField(this, "app", app);
     __publicField(this, "getSettings", getSettings);
     __publicField(this, "patches", /* @__PURE__ */ new Map());
+    __publicField(this, "disposed", false);
   }
   patchOpenGraphs() {
+    if (this.disposed) return;
     for (const patch of this.reconcileOpenGraphs()) {
       refreshView(patch.view);
     }
   }
+  async patchAfterLeafLoad(leaf) {
+    if (this.disposed) return;
+    if ((leaf == null ? void 0 : leaf.getViewState().type) === "graph") {
+      try {
+        await leaf.loadIfDeferred();
+      } catch (error) {
+        console.warn(
+          "Folder Virtual Links could not load the graph view",
+          error
+        );
+        return;
+      }
+    }
+    this.patchOpenGraphs();
+  }
   refreshAll() {
+    if (this.disposed) return;
     this.reconcileOpenGraphs();
     for (const patch of this.patches.values()) {
       refreshView(patch.view);
     }
   }
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const patch of [...this.patches.values()]) {
       this.releasePatch(patch, true);
     }
@@ -860,9 +880,15 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
         }
       )
     );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        this.patchAfterLeafLoad(leaf);
+      })
+    );
     this.app.workspace.onLayoutReady(() => {
-      var _a;
-      if (this.isActive) (_a = this.bridge) == null ? void 0 : _a.patchOpenGraphs();
+      if (this.isActive) {
+        this.patchAfterLeafLoad(this.app.workspace.getMostRecentLeaf());
+      }
     });
   }
   onunload() {
@@ -894,6 +920,10 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
   }
   async loadSettings() {
     this.settings = normalizeSettings(await this.loadData());
+  }
+  patchAfterLeafLoad(leaf) {
+    var _a;
+    void ((_a = this.bridge) == null ? void 0 : _a.patchAfterLeafLoad(leaf));
   }
   async updateSettings(updates) {
     var _a;

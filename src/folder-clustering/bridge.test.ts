@@ -191,6 +191,84 @@ describe("native graph bridge", () => {
     expect(update).toHaveBeenCalledOnce();
   });
 
+  it("loads a deferred graph before patching its renderer", async () => {
+    const originalSetData = vi.fn();
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      setData: originalSetData,
+    };
+    const update = vi.fn();
+    const view: GraphViewLike & { getViewType: () => string } = {
+      getViewType: () => "graph",
+    };
+    const leaf = {
+      getViewState: () => ({ type: "graph" }),
+      loadIfDeferred: vi.fn(() => {
+        view.renderer = renderer;
+        view.update = update;
+        return Promise.resolve();
+      }),
+      view,
+    };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
+
+    await bridge.patchAfterLeafLoad(leaf as never);
+
+    expect(leaf.loadIfDeferred).toHaveBeenCalledOnce();
+    expect(renderer.setData).not.toBe(originalSetData);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it("does not patch a graph that finishes loading after disposal", async () => {
+    const originalSetData = vi.fn();
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      setData: originalSetData,
+    };
+    const update = vi.fn();
+    const view: GraphViewLike & { getViewType: () => string } = {
+      getViewType: () => "graph",
+    };
+    let finishLoading: (() => void) | undefined;
+    const leaf = {
+      getViewState: () => ({ type: "graph" }),
+      loadIfDeferred: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishLoading = () => {
+              view.renderer = renderer;
+              view.update = update;
+              resolve();
+            };
+          }),
+      ),
+      view,
+    };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
+
+    const patching = bridge.patchAfterLeafLoad(leaf as never);
+    bridge.dispose();
+    finishLoading?.();
+    await patching;
+
+    expect(renderer.setData).toBe(originalSetData);
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("wraps and restores the native render callback", () => {
     const originalRenderCallback = vi.fn();
     const data: GraphDataLike = {

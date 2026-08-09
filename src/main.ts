@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { Plugin, type WorkspaceLeaf } from "obsidian";
 import { NativeGraphBridge } from "./folder-clustering/bridge";
 import {
   DEFAULT_SETTINGS,
@@ -36,8 +36,15 @@ export default class FolderVirtualLinksPlugin extends Plugin {
         this.bridge?.patchOpenGraphs(),
       ),
     );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        this.patchAfterLeafLoad(leaf);
+      }),
+    );
     this.app.workspace.onLayoutReady(() => {
-      if (this.isActive) this.bridge?.patchOpenGraphs();
+      if (this.isActive) {
+        this.patchAfterLeafLoad(this.app.workspace.getMostRecentLeaf());
+      }
     });
   }
 
@@ -75,6 +82,10 @@ export default class FolderVirtualLinksPlugin extends Plugin {
 
   private async loadSettings(): Promise<void> {
     this.settings = normalizeSettings(await this.loadData());
+  }
+
+  private patchAfterLeafLoad(leaf: WorkspaceLeaf | null): void {
+    void this.bridge?.patchAfterLeafLoad(leaf);
   }
 
   private async updateSettings(

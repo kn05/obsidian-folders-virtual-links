@@ -65,6 +65,9 @@ current settings manually.
 
 ## Compatibility
 
+Obsidian 1.13.4 or later is supported on desktop and mobile. The plugin does not
+use Node.js or Electron APIs.
+
 Obsidian has no public graph renderer API. This plugin uses a guarded integration
 with the native renderer. If the contour interface changes, virtual-link
 clustering continues without contours. If the data interface changes, the

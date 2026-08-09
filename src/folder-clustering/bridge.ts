@@ -182,6 +182,7 @@ function createRendererPatch(
 
 export class NativeGraphBridge {
   private readonly patches = new Map<GraphRendererLike, RendererPatch>();
+  private disposed = false;
 
   constructor(
     private readonly app: App,
@@ -189,12 +190,32 @@ export class NativeGraphBridge {
   ) {}
 
   patchOpenGraphs(): void {
+    if (this.disposed) return;
     for (const patch of this.reconcileOpenGraphs()) {
       refreshView(patch.view);
     }
   }
 
+  async patchAfterLeafLoad(leaf: WorkspaceLeaf | null): Promise<void> {
+    if (this.disposed) return;
+
+    if (leaf?.getViewState().type === "graph") {
+      try {
+        await leaf.loadIfDeferred();
+      } catch (error) {
+        console.warn(
+          "Folder Virtual Links could not load the graph view",
+          error,
+        );
+        return;
+      }
+    }
+
+    this.patchOpenGraphs();
+  }
+
   refreshAll(): void {
+    if (this.disposed) return;
     this.reconcileOpenGraphs();
     for (const patch of this.patches.values()) {
       refreshView(patch.view);
@@ -202,6 +223,8 @@ export class NativeGraphBridge {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const patch of [...this.patches.values()]) {
       this.releasePatch(patch, true);
     }

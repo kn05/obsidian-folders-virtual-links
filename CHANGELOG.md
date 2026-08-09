@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-08-09
+
+- Support Obsidian 1.13.4 on desktop and mobile.
+- Load deferred graph views before applying folder links and contours.
+- Keep contour geometry compatible with iOS 15.
+
 ## 0.3.0 - 2026-08-09
 
 - Add deterministic, labeled folder contours to the native global graph.

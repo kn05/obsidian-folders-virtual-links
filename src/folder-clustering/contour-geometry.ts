@@ -28,8 +28,8 @@ export function convexHull(points: readonly Point[]): Point[] {
   const lower: Point[] = [];
   for (const point of sorted) {
     while (lower.length >= 2) {
-      const origin = lower.at(-2);
-      const left = lower.at(-1);
+      const origin = lower[lower.length - 2];
+      const left = lower[lower.length - 1];
       if (origin === undefined || left === undefined) break;
       if (cross(origin, left, point) > 0) break;
       lower.pop();
@@ -40,8 +40,8 @@ export function convexHull(points: readonly Point[]): Point[] {
   const upper: Point[] = [];
   for (const point of [...sorted].reverse()) {
     while (upper.length >= 2) {
-      const origin = upper.at(-2);
-      const left = upper.at(-1);
+      const origin = upper[upper.length - 2];
+      const left = upper[upper.length - 1];
       if (origin === undefined || left === undefined) break;
       if (cross(origin, left, point) > 0) break;
       upper.pop();
