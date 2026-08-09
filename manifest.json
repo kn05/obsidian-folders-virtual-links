@@ -1,0 +1,10 @@
+{
+  "id": "folder-virtual-links",
+  "name": "Folder Virtual Links",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.4",
+  "description": "Clusters notes by folder in the native graph using invisible, deterministic virtual links.",
+  "author": "kn05",
+  "authorUrl": "https://github.com/kn05",
+  "isDesktopOnly": true
+}

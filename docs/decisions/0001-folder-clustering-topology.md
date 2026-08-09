@@ -28,10 +28,11 @@ For every direct parent folder represented in the currently visible global graph
 1. Sort the member paths by a seeded hash and connect them in one Hamiltonian
    cycle. This guarantees connectivity without a hub.
 2. Add deterministic, independently shuffled matching edges until every node has
-   virtual degree 3 by default, or degree 4 when selected in settings.
+   folder-topology degree 3 by default, or degree 4 when selected in settings.
 3. If an odd node count makes a 3-regular graph impossible, one deterministic
    node receives degree 4. Small folders use the largest possible simple graph.
-4. Reject self-links, duplicate links, and any pair already joined by a real link.
+4. Reject self-links and duplicates. If a planned pair already has a real link,
+   that real spring satisfies the topology edge and no virtual copy is added.
 
 The result is an expander-style sparse topology: O(n) edges, balanced degree, no
 privileged centroid note, deterministic output, and much shorter paths than a
@@ -61,6 +62,13 @@ backlinks, metadata cache, and vault files retain only real links.
 This design deliberately uses an undocumented internal API. It must fail open:
 if the renderer shape changes, the native graph still renders without virtual
 links. Every release must be tested against the current public Obsidian build.
+
+The 0.1.0 integration was source-checked against the official Obsidian 1.13.4
+bundle. Its renderer builds foreground link objects, synchronously posts the
+resulting node/link ID arrays to the worker, and only then returns from `setData`.
+Removing the virtual foreground objects after that return therefore leaves the
+worker springs intact. The native node-weight formula is also restored after the
+virtual foreground relationships are removed.
 
 Virtual links use the core graph's global spring strength. Degree 3 is the safe
 default because sparsity controls the total extra attraction. Degree 4 is an

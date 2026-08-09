@@ -1,0 +1,28 @@
+{
+  "name": "obsidian-folders-virtual-links",
+  "version": "0.1.0",
+  "description": "Invisible folder-clustering links for Obsidian's native graph view.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "test": "vitest run",
+    "check": "npm test && npm run build"
+  },
+  "keywords": [
+    "obsidian",
+    "graph",
+    "folders",
+    "clustering"
+  ],
+  "author": "kn05",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
