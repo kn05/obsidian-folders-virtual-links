@@ -196,6 +196,7 @@ describe("native graph bridge", () => {
     const renderer: GraphRendererLike = {
       links: [],
       nodes: [],
+      renderCallback: vi.fn(),
       setData: originalSetData,
     };
     const update = vi.fn();
@@ -267,6 +268,46 @@ describe("native graph bridge", () => {
 
     expect(renderer.setData).toBe(originalSetData);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("attaches a render callback that appears after a graph reopens", async () => {
+    const originalRenderCallback = vi.fn();
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      setData: vi.fn(),
+    };
+    const update = vi.fn();
+    const view = {
+      getViewType: () => "graph",
+      renderer,
+      update,
+    };
+    const leaf = {
+      getViewState: () => ({ type: "graph" }),
+      loadIfDeferred: vi.fn(() => Promise.resolve()),
+      view,
+    };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const waitForFrame = vi.fn(() => {
+      renderer.renderCallback = originalRenderCallback;
+      return Promise.resolve();
+    });
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+      waitForFrame,
+    );
+
+    await bridge.patchAfterLeafLoad(leaf as never);
+
+    expect(waitForFrame).toHaveBeenCalledOnce();
+    expect(renderer.renderCallback).not.toBe(originalRenderCallback);
+    renderer.renderCallback?.();
+    expect(originalRenderCallback).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledTimes(2);
   });
 
   it("wraps and restores the native render callback", () => {

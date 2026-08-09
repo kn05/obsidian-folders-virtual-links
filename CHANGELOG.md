@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-08-09
+
+- Restore folder contours after reopening a graph on mobile.
+- Attach the contour render callback when the graph renderer finishes loading.
+
 ## 0.4.0 - 2026-08-09
 
 - Support Obsidian 1.13.4 on desktop and mobile.

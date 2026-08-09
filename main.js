@@ -539,6 +539,18 @@ function augmentGraphData(original, settings) {
 }
 
 // src/folder-clustering/bridge.ts
+var RENDER_CALLBACK_SYNC_FRAMES = 30;
+function waitForNextFrame() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        resolve();
+      });
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
 function deleteLinkReference(lookup, id, link) {
   if ((lookup == null ? void 0 : lookup[id]) === link) Reflect.deleteProperty(lookup, id);
 }
@@ -589,10 +601,11 @@ function refreshView(view) {
 }
 function createRendererPatch(view, renderer, getSettings) {
   const originalSetData = renderer.setData;
-  const originalRenderCallback = renderer.renderCallback;
   let active = true;
   let contourLayer;
-  let contoursCompatible = typeof originalRenderCallback === "function";
+  let contoursCompatible = true;
+  let originalRenderCallback;
+  let renderWrapper;
   const clearContours = () => {
     try {
       contourLayer == null ? void 0 : contourLayer.dispose();
@@ -606,10 +619,7 @@ function createRendererPatch(view, renderer, getSettings) {
     if (!active || !enabled || !contoursCompatible) return;
     try {
       contourLayer = FolderContourLayer.create(renderer);
-      if (contourLayer === void 0) {
-        contoursCompatible = false;
-        return;
-      }
+      if (contourLayer === void 0) return;
       contourLayer.setGroups(groups);
       contourLayer.update();
     } catch (error) {
@@ -618,6 +628,26 @@ function createRendererPatch(view, renderer, getSettings) {
       console.warn("Folder Virtual Links could not draw contours", error);
     }
   };
+  const synchronizeRenderCallback = () => {
+    if (!active || renderWrapper !== void 0) return false;
+    const callback = renderer.renderCallback;
+    if (typeof callback !== "function") return false;
+    originalRenderCallback = callback;
+    renderWrapper = () => {
+      if (active && contourLayer !== void 0) {
+        try {
+          contourLayer.update();
+        } catch (error) {
+          contoursCompatible = false;
+          clearContours();
+          console.warn("Folder Virtual Links stopped updating contours", error);
+        }
+      }
+      return callback.call(renderer);
+    };
+    renderer.renderCallback = renderWrapper;
+    return true;
+  };
   const wrapper = (data) => {
     if (!active) return originalSetData.call(renderer, data);
     try {
@@ -625,6 +655,7 @@ function createRendererPatch(view, renderer, getSettings) {
       const augmented = augmentGraphData(data, settings);
       clearContours();
       const result = originalSetData.call(renderer, augmented.data);
+      synchronizeRenderCallback();
       stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
       replaceContours(augmented.folderGroups, settings.showFolderContours);
       return result;
@@ -634,38 +665,27 @@ function createRendererPatch(view, renderer, getSettings) {
       return originalSetData.call(renderer, data);
     }
   };
-  const renderWrapper = originalRenderCallback === void 0 ? void 0 : () => {
-    if (active && contourLayer !== void 0) {
-      try {
-        contourLayer.update();
-      } catch (error) {
-        contoursCompatible = false;
-        clearContours();
-        console.warn(
-          "Folder Virtual Links stopped updating contours",
-          error
-        );
-      }
-    }
-    return originalRenderCallback.call(renderer);
-  };
   return {
     deactivate: () => {
       active = false;
       clearContours();
+      if (renderer.renderCallback === renderWrapper) {
+        renderer.renderCallback = originalRenderCallback;
+      }
     },
-    originalRenderCallback,
+    hasRenderCallback: () => renderWrapper !== void 0,
     originalSetData,
-    renderWrapper,
     renderer,
+    synchronizeRenderCallback,
     view,
     wrapper
   };
 }
 var NativeGraphBridge = class {
-  constructor(app, getSettings) {
+  constructor(app, getSettings, waitForFrame = waitForNextFrame) {
     __publicField(this, "app", app);
     __publicField(this, "getSettings", getSettings);
+    __publicField(this, "waitForFrame", waitForFrame);
     __publicField(this, "patches", /* @__PURE__ */ new Map());
     __publicField(this, "disposed", false);
   }
@@ -676,7 +696,8 @@ var NativeGraphBridge = class {
     }
   }
   async patchAfterLeafLoad(leaf) {
-    if (this.disposed) return;
+    var _a;
+    if (this.isDisposed()) return;
     if ((leaf == null ? void 0 : leaf.getViewState().type) === "graph") {
       try {
         await leaf.loadIfDeferred();
@@ -686,6 +707,15 @@ var NativeGraphBridge = class {
           error
         );
         return;
+      }
+      for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
+        if (this.isDisposed()) return;
+        this.patchOpenGraphs();
+        const renderer = (_a = asGraphView(leaf)) == null ? void 0 : _a.renderer;
+        const patch = renderer === void 0 ? void 0 : this.patches.get(renderer);
+        if ((patch == null ? void 0 : patch.hasRenderCallback()) === true) return;
+        await this.waitForFrame();
+        if (leaf.getViewState().type !== "graph") break;
       }
     }
     this.patchOpenGraphs();
@@ -716,29 +746,31 @@ var NativeGraphBridge = class {
     for (const [renderer, patch] of this.patches) {
       if (!openGraphs.has(renderer)) this.releasePatch(patch, false);
     }
-    const addedPatches = [];
+    const refreshPatches = /* @__PURE__ */ new Set();
     for (const [renderer, view] of openGraphs) {
-      if (this.patches.has(renderer)) continue;
+      const current = this.patches.get(renderer);
+      if (current !== void 0) {
+        if (current.synchronizeRenderCallback()) refreshPatches.add(current);
+        continue;
+      }
       const patch = createRendererPatch(view, renderer, this.getSettings);
       renderer.setData = patch.wrapper;
-      if (patch.renderWrapper !== void 0) {
-        renderer.renderCallback = patch.renderWrapper;
-      }
       this.patches.set(renderer, patch);
-      addedPatches.push(patch);
+      patch.synchronizeRenderCallback();
+      refreshPatches.add(patch);
     }
-    return addedPatches;
+    return [...refreshPatches];
   }
   releasePatch(patch, refresh) {
     patch.deactivate();
     if (patch.renderer.setData === patch.wrapper) {
       patch.renderer.setData = patch.originalSetData;
     }
-    if (patch.renderer.renderCallback === patch.renderWrapper) {
-      patch.renderer.renderCallback = patch.originalRenderCallback;
-    }
     this.patches.delete(patch.renderer);
     if (refresh) refreshView(patch.view);
+  }
+  isDisposed() {
+    return this.disposed;
   }
 };
 

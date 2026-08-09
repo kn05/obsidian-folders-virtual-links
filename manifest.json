@@ -1,7 +1,7 @@
 {
   "id": "folder-virtual-links",
   "name": "Folder Virtual Links",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "minAppVersion": "1.13.4",
   "description": "Clusters notes by folder and outlines their areas in the native graph.",
   "author": "kn05",
