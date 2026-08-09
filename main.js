@@ -603,9 +603,7 @@ function createRendererPatch(view, renderer, getSettings) {
   const originalSetData = renderer.setData;
   let active = true;
   let contourLayer;
-  let contoursCompatible = true;
-  let originalRenderCallback;
-  let renderWrapper;
+  let renderHook;
   const clearContours = () => {
     try {
       contourLayer == null ? void 0 : contourLayer.dispose();
@@ -616,36 +614,48 @@ function createRendererPatch(view, renderer, getSettings) {
   };
   const replaceContours = (groups, enabled) => {
     clearContours();
-    if (!active || !enabled || !contoursCompatible) return;
+    if (!active || !enabled) return;
     try {
       contourLayer = FolderContourLayer.create(renderer);
       if (contourLayer === void 0) return;
       contourLayer.setGroups(groups);
       contourLayer.update();
     } catch (error) {
-      contoursCompatible = false;
       clearContours();
       console.warn("Folder Virtual Links could not draw contours", error);
     }
   };
+  const createRenderCallbackHook = (callback) => {
+    let enabled = true;
+    return {
+      deactivate: () => {
+        enabled = false;
+      },
+      original: callback,
+      wrapper: () => {
+        if (enabled && active && contourLayer !== void 0) {
+          try {
+            contourLayer.update();
+          } catch (error) {
+            clearContours();
+            console.warn(
+              "Folder Virtual Links stopped updating contours",
+              error
+            );
+          }
+        }
+        return callback.call(renderer);
+      }
+    };
+  };
   const synchronizeRenderCallback = () => {
-    if (!active || renderWrapper !== void 0) return false;
+    if (!active) return false;
     const callback = renderer.renderCallback;
     if (typeof callback !== "function") return false;
-    originalRenderCallback = callback;
-    renderWrapper = () => {
-      if (active && contourLayer !== void 0) {
-        try {
-          contourLayer.update();
-        } catch (error) {
-          contoursCompatible = false;
-          clearContours();
-          console.warn("Folder Virtual Links stopped updating contours", error);
-        }
-      }
-      return callback.call(renderer);
-    };
-    renderer.renderCallback = renderWrapper;
+    if (callback === (renderHook == null ? void 0 : renderHook.wrapper)) return false;
+    renderHook == null ? void 0 : renderHook.deactivate();
+    renderHook = createRenderCallbackHook(callback);
+    renderer.renderCallback = renderHook.wrapper;
     return true;
   };
   const wrapper = (data) => {
@@ -669,11 +679,12 @@ function createRendererPatch(view, renderer, getSettings) {
     deactivate: () => {
       active = false;
       clearContours();
-      if (renderer.renderCallback === renderWrapper) {
-        renderer.renderCallback = originalRenderCallback;
+      const hook = renderHook;
+      hook == null ? void 0 : hook.deactivate();
+      if (hook !== void 0 && renderer.renderCallback === hook.wrapper) {
+        renderer.renderCallback = hook.original;
       }
     },
-    hasRenderCallback: () => renderWrapper !== void 0,
     originalSetData,
     renderer,
     synchronizeRenderCallback,
@@ -696,7 +707,6 @@ var NativeGraphBridge = class {
     }
   }
   async patchAfterLeafLoad(leaf) {
-    var _a;
     if (this.isDisposed()) return;
     if ((leaf == null ? void 0 : leaf.getViewState().type) === "graph") {
       try {
@@ -711,9 +721,6 @@ var NativeGraphBridge = class {
       for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
         if (this.isDisposed()) return;
         this.patchOpenGraphs();
-        const renderer = (_a = asGraphView(leaf)) == null ? void 0 : _a.renderer;
-        const patch = renderer === void 0 ? void 0 : this.patches.get(renderer);
-        if ((patch == null ? void 0 : patch.hasRenderCallback()) === true) return;
         await this.waitForFrame();
         if (leaf.getViewState().type !== "graph") break;
       }

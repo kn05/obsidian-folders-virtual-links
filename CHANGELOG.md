@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 - 2026-08-09
+
+- Reattach folder contours when mobile graph initialization replaces the render
+  callback.
+- Keep earlier callback wrappers inactive after a replacement.
+- Retry contour setup after a temporary renderer initialization error.
+
 ## 0.4.1 - 2026-08-09
 
 - Restore folder contours after reopening a graph on mobile.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { NativeGraphBridge, stripVirtualLinks } from "./bridge";
+import { FolderContourLayer } from "./contours";
 import { edgeKey } from "./topology";
 import type {
   FolderVirtualLinksSettings,
@@ -291,8 +292,12 @@ describe("native graph bridge", () => {
     const app = {
       workspace: { getLeavesOfType: () => [leaf] },
     };
+    let initialized = false;
     const waitForFrame = vi.fn(() => {
-      renderer.renderCallback = originalRenderCallback;
+      if (!initialized) {
+        renderer.renderCallback = originalRenderCallback;
+        initialized = true;
+      }
       return Promise.resolve();
     });
     const bridge = new NativeGraphBridge(
@@ -303,11 +308,102 @@ describe("native graph bridge", () => {
 
     await bridge.patchAfterLeafLoad(leaf as never);
 
-    expect(waitForFrame).toHaveBeenCalledOnce();
+    expect(waitForFrame).toHaveBeenCalledTimes(30);
     expect(renderer.renderCallback).not.toBe(originalRenderCallback);
     renderer.renderCallback?.();
     expect(originalRenderCallback).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it("reattaches a render callback replaced during graph initialization", () => {
+    const initialRenderCallback = vi.fn();
+    const replacementRenderCallback = vi.fn();
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      renderCallback: initialRenderCallback,
+      setData: vi.fn(),
+    };
+    const update = vi.fn();
+    const leaf = {
+      view: {
+        getViewType: () => "graph",
+        renderer,
+        update,
+      },
+    };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
+
+    bridge.patchOpenGraphs();
+    const firstWrapper = renderer.renderCallback;
+    renderer.renderCallback = replacementRenderCallback;
+
+    bridge.refreshAll();
+
+    expect(renderer.renderCallback).not.toBe(firstWrapper);
+    expect(renderer.renderCallback).not.toBe(replacementRenderCallback);
+    renderer.renderCallback();
+    expect(replacementRenderCallback).toHaveBeenCalledOnce();
+
+    bridge.dispose();
+    expect(renderer.renderCallback).toBe(replacementRenderCallback);
+  });
+
+  it("retries contour setup after a transient renderer error", () => {
+    const contourLayer = {
+      dispose: vi.fn(),
+      setGroups: vi.fn(),
+      update: vi.fn(),
+    };
+    const createContourLayer = vi
+      .spyOn(FolderContourLayer, "create")
+      .mockImplementationOnce(() => {
+        throw new Error("Renderer is not ready");
+      })
+      .mockReturnValue(contourLayer as never);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const data: GraphDataLike = {
+      nodes: {
+        "folder/a.md": { type: "", links: {} },
+        "folder/b.md": { type: "", links: {} },
+      },
+      numLinks: 0,
+    };
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      renderCallback: vi.fn(),
+      setData: vi.fn(),
+    };
+    const view: GraphViewLike = { renderer };
+    view.update = () => renderer.setData(data);
+    const leaf = { view: { getViewType: () => "graph", ...view } };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
+
+    try {
+      bridge.patchOpenGraphs();
+      bridge.refreshAll();
+
+      expect(createContourLayer).toHaveBeenCalledTimes(2);
+      expect(contourLayer.setGroups).toHaveBeenCalledOnce();
+      expect(contourLayer.update).toHaveBeenCalledOnce();
+    } finally {
+      bridge.dispose();
+      createContourLayer.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it("wraps and restores the native render callback", () => {

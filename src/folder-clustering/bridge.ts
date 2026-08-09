@@ -13,12 +13,17 @@ const RENDER_CALLBACK_SYNC_FRAMES = 30;
 
 interface RendererPatch {
   deactivate: () => void;
-  hasRenderCallback: () => boolean;
   originalSetData: GraphRendererLike["setData"];
   renderer: GraphRendererLike;
   synchronizeRenderCallback: () => boolean;
   view: GraphViewLike;
   wrapper: GraphRendererLike["setData"];
+}
+
+interface RenderCallbackHook {
+  deactivate: () => void;
+  original: NonNullable<GraphRendererLike["renderCallback"]>;
+  wrapper: NonNullable<GraphRendererLike["renderCallback"]>;
 }
 
 type FrameWaiter = () => Promise<void>;
@@ -111,9 +116,7 @@ function createRendererPatch(
   const originalSetData = renderer.setData;
   let active = true;
   let contourLayer: FolderContourLayer | undefined;
-  let contoursCompatible = true;
-  let originalRenderCallback: GraphRendererLike["renderCallback"];
-  let renderWrapper: GraphRendererLike["renderCallback"];
+  let renderHook: RenderCallbackHook | undefined;
 
   const clearContours = () => {
     try {
@@ -129,7 +132,7 @@ function createRendererPatch(
     enabled: boolean,
   ) => {
     clearContours();
-    if (!active || !enabled || !contoursCompatible) return;
+    if (!active || !enabled) return;
 
     try {
       contourLayer = FolderContourLayer.create(renderer);
@@ -137,32 +140,47 @@ function createRendererPatch(
       contourLayer.setGroups(groups);
       contourLayer.update();
     } catch (error) {
-      contoursCompatible = false;
       clearContours();
       console.warn("Folder Virtual Links could not draw contours", error);
     }
   };
 
+  const createRenderCallbackHook = (
+    callback: NonNullable<GraphRendererLike["renderCallback"]>,
+  ): RenderCallbackHook => {
+    let enabled = true;
+    return {
+      deactivate: () => {
+        enabled = false;
+      },
+      original: callback,
+      wrapper: () => {
+        if (enabled && active && contourLayer !== undefined) {
+          try {
+            contourLayer.update();
+          } catch (error) {
+            clearContours();
+            console.warn(
+              "Folder Virtual Links stopped updating contours",
+              error,
+            );
+          }
+        }
+        return callback.call(renderer);
+      },
+    };
+  };
+
   const synchronizeRenderCallback = (): boolean => {
-    if (!active || renderWrapper !== undefined) return false;
+    if (!active) return false;
 
     const callback = renderer.renderCallback;
     if (typeof callback !== "function") return false;
+    if (callback === renderHook?.wrapper) return false;
 
-    originalRenderCallback = callback;
-    renderWrapper = () => {
-      if (active && contourLayer !== undefined) {
-        try {
-          contourLayer.update();
-        } catch (error) {
-          contoursCompatible = false;
-          clearContours();
-          console.warn("Folder Virtual Links stopped updating contours", error);
-        }
-      }
-      return callback.call(renderer);
-    };
-    renderer.renderCallback = renderWrapper;
+    renderHook?.deactivate();
+    renderHook = createRenderCallbackHook(callback);
+    renderer.renderCallback = renderHook.wrapper;
     return true;
   };
 
@@ -189,11 +207,12 @@ function createRendererPatch(
     deactivate: () => {
       active = false;
       clearContours();
-      if (renderer.renderCallback === renderWrapper) {
-        renderer.renderCallback = originalRenderCallback;
+      const hook = renderHook;
+      hook?.deactivate();
+      if (hook !== undefined && renderer.renderCallback === hook.wrapper) {
+        renderer.renderCallback = hook.original;
       }
     },
-    hasRenderCallback: () => renderWrapper !== undefined,
     originalSetData,
     renderer,
     synchronizeRenderCallback,
@@ -236,12 +255,6 @@ export class NativeGraphBridge {
       for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
         if (this.isDisposed()) return;
         this.patchOpenGraphs();
-
-        const renderer = asGraphView(leaf)?.renderer;
-        const patch =
-          renderer === undefined ? undefined : this.patches.get(renderer);
-        if (patch?.hasRenderCallback() === true) return;
-
         await this.waitForFrame();
         if (leaf.getViewState().type !== "graph") break;
       }
