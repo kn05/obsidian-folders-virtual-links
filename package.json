@@ -1,6 +1,6 @@
 {
   "name": "obsidian-folders-virtual-links",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Folder clustering links and contours for Obsidian's native graph view.",
   "main": "main.js",
   "type": "module",

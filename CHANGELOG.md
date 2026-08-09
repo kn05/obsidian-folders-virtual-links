@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 - 2026-08-09
+
+- Keep checking for a mobile graph after early workspace events.
+- Apply the same bounded synchronization after layout and active-leaf changes.
+
 ## 0.4.2 - 2026-08-09
 
 - Reattach folder contours when mobile graph initialization replaces the render

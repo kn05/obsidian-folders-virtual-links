@@ -224,6 +224,7 @@ function createRendererPatch(
 export class NativeGraphBridge {
   private readonly patches = new Map<GraphRendererLike, RendererPatch>();
   private disposed = false;
+  private synchronizationId = 0;
 
   constructor(
     private readonly app: App,
@@ -238,7 +239,10 @@ export class NativeGraphBridge {
     }
   }
 
-  async patchAfterLeafLoad(leaf: WorkspaceLeaf | null): Promise<void> {
+  async synchronizeAfterWorkspaceChange(
+    leaf: WorkspaceLeaf | null,
+  ): Promise<void> {
+    const synchronizationId = ++this.synchronizationId;
     if (this.isDisposed()) return;
 
     if (leaf?.getViewState().type === "graph") {
@@ -251,16 +255,17 @@ export class NativeGraphBridge {
         );
         return;
       }
-
-      for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
-        if (this.isDisposed()) return;
-        this.patchOpenGraphs();
-        await this.waitForFrame();
-        if (leaf.getViewState().type !== "graph") break;
-      }
     }
 
-    this.patchOpenGraphs();
+    for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
+      if (this.isDisposed() || synchronizationId !== this.synchronizationId) {
+        return;
+      }
+      this.patchOpenGraphs();
+      await this.waitForFrame();
+    }
+
+    if (synchronizationId === this.synchronizationId) this.patchOpenGraphs();
   }
 
   refreshAll(): void {
@@ -274,6 +279,7 @@ export class NativeGraphBridge {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.synchronizationId += 1;
     for (const patch of [...this.patches.values()]) {
       this.releasePatch(patch, true);
     }

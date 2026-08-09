@@ -221,7 +221,7 @@ describe("native graph bridge", () => {
       () => DEFAULT_TEST_SETTINGS,
     );
 
-    await bridge.patchAfterLeafLoad(leaf as never);
+    await bridge.synchronizeAfterWorkspaceChange(leaf as never);
 
     expect(leaf.loadIfDeferred).toHaveBeenCalledOnce();
     expect(renderer.setData).not.toBe(originalSetData);
@@ -262,7 +262,7 @@ describe("native graph bridge", () => {
       () => DEFAULT_TEST_SETTINGS,
     );
 
-    const patching = bridge.patchAfterLeafLoad(leaf as never);
+    const patching = bridge.synchronizeAfterWorkspaceChange(leaf as never);
     bridge.dispose();
     finishLoading?.();
     await patching;
@@ -306,13 +306,58 @@ describe("native graph bridge", () => {
       waitForFrame,
     );
 
-    await bridge.patchAfterLeafLoad(leaf as never);
+    await bridge.synchronizeAfterWorkspaceChange(leaf as never);
 
     expect(waitForFrame).toHaveBeenCalledTimes(30);
     expect(renderer.renderCallback).not.toBe(originalRenderCallback);
     renderer.renderCallback?.();
     expect(originalRenderCallback).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it("patches a view that becomes a graph after the workspace event", async () => {
+    let viewType = "empty";
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      renderCallback: vi.fn(),
+      setData: vi.fn(),
+    };
+    const update = vi.fn();
+    const view: GraphViewLike & { getViewType: () => string } = {
+      getViewType: () => viewType,
+    };
+    const leaf = {
+      getViewState: () => ({ type: viewType }),
+      loadIfDeferred: vi.fn(() => Promise.resolve()),
+      view,
+    };
+    const app = {
+      workspace: {
+        getLeavesOfType: () => (viewType === "graph" ? [leaf] : []),
+      },
+    };
+    let initialized = false;
+    const waitForFrame = vi.fn(() => {
+      if (!initialized) {
+        viewType = "graph";
+        view.renderer = renderer;
+        view.update = update;
+        initialized = true;
+      }
+      return Promise.resolve();
+    });
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+      waitForFrame,
+    );
+
+    await bridge.synchronizeAfterWorkspaceChange(leaf as never);
+
+    expect(leaf.loadIfDeferred).not.toHaveBeenCalled();
+    expect(renderer.renderCallback).not.toBeUndefined();
+    expect(update).toHaveBeenCalledOnce();
   });
 
   it("reattaches a render callback replaced during graph initialization", () => {

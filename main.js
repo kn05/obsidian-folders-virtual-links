@@ -699,6 +699,7 @@ var NativeGraphBridge = class {
     __publicField(this, "waitForFrame", waitForFrame);
     __publicField(this, "patches", /* @__PURE__ */ new Map());
     __publicField(this, "disposed", false);
+    __publicField(this, "synchronizationId", 0);
   }
   patchOpenGraphs() {
     if (this.disposed) return;
@@ -706,7 +707,8 @@ var NativeGraphBridge = class {
       refreshView(patch.view);
     }
   }
-  async patchAfterLeafLoad(leaf) {
+  async synchronizeAfterWorkspaceChange(leaf) {
+    const synchronizationId = ++this.synchronizationId;
     if (this.isDisposed()) return;
     if ((leaf == null ? void 0 : leaf.getViewState().type) === "graph") {
       try {
@@ -718,14 +720,15 @@ var NativeGraphBridge = class {
         );
         return;
       }
-      for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
-        if (this.isDisposed()) return;
-        this.patchOpenGraphs();
-        await this.waitForFrame();
-        if (leaf.getViewState().type !== "graph") break;
-      }
     }
-    this.patchOpenGraphs();
+    for (let frame = 0; frame < RENDER_CALLBACK_SYNC_FRAMES; frame += 1) {
+      if (this.isDisposed() || synchronizationId !== this.synchronizationId) {
+        return;
+      }
+      this.patchOpenGraphs();
+      await this.waitForFrame();
+    }
+    if (synchronizationId === this.synchronizationId) this.patchOpenGraphs();
   }
   refreshAll() {
     if (this.disposed) return;
@@ -737,6 +740,7 @@ var NativeGraphBridge = class {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.synchronizationId += 1;
     for (const patch of [...this.patches.values()]) {
       this.releasePatch(patch, true);
     }
@@ -911,22 +915,22 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.registerEvent(
-      this.app.workspace.on(
-        "layout-change",
-        () => {
-          var _a;
-          return (_a = this.bridge) == null ? void 0 : _a.patchOpenGraphs();
-        }
-      )
+      this.app.workspace.on("layout-change", () => {
+        this.synchronizeAfterWorkspaceChange(
+          this.app.workspace.getMostRecentLeaf()
+        );
+      })
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        this.patchAfterLeafLoad(leaf);
+        this.synchronizeAfterWorkspaceChange(leaf);
       })
     );
     this.app.workspace.onLayoutReady(() => {
       if (this.isActive) {
-        this.patchAfterLeafLoad(this.app.workspace.getMostRecentLeaf());
+        this.synchronizeAfterWorkspaceChange(
+          this.app.workspace.getMostRecentLeaf()
+        );
       }
     });
   }
@@ -960,9 +964,9 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
   async loadSettings() {
     this.settings = normalizeSettings(await this.loadData());
   }
-  patchAfterLeafLoad(leaf) {
+  synchronizeAfterWorkspaceChange(leaf) {
     var _a;
-    void ((_a = this.bridge) == null ? void 0 : _a.patchAfterLeafLoad(leaf));
+    void ((_a = this.bridge) == null ? void 0 : _a.synchronizeAfterWorkspaceChange(leaf));
   }
   async updateSettings(updates) {
     var _a;

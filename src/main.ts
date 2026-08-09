@@ -32,18 +32,22 @@ export default class FolderVirtualLinksPlugin extends Plugin {
     });
 
     this.registerEvent(
-      this.app.workspace.on("layout-change", () =>
-        this.bridge?.patchOpenGraphs(),
-      ),
+      this.app.workspace.on("layout-change", () => {
+        this.synchronizeAfterWorkspaceChange(
+          this.app.workspace.getMostRecentLeaf(),
+        );
+      }),
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        this.patchAfterLeafLoad(leaf);
+        this.synchronizeAfterWorkspaceChange(leaf);
       }),
     );
     this.app.workspace.onLayoutReady(() => {
       if (this.isActive) {
-        this.patchAfterLeafLoad(this.app.workspace.getMostRecentLeaf());
+        this.synchronizeAfterWorkspaceChange(
+          this.app.workspace.getMostRecentLeaf(),
+        );
       }
     });
   }
@@ -84,8 +88,8 @@ export default class FolderVirtualLinksPlugin extends Plugin {
     this.settings = normalizeSettings(await this.loadData());
   }
 
-  private patchAfterLeafLoad(leaf: WorkspaceLeaf | null): void {
-    void this.bridge?.patchAfterLeafLoad(leaf);
+  private synchronizeAfterWorkspaceChange(leaf: WorkspaceLeaf | null): void {
+    void this.bridge?.synchronizeAfterWorkspaceChange(leaf);
   }
 
   private async updateSettings(
