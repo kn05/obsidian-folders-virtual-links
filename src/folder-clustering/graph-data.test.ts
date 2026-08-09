@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { augmentGraphData, directParent } from "./graph-data";
+import {
+  augmentGraphData,
+  directParent,
+  groupingFolder,
+  isFolderExcluded,
+} from "./graph-data";
 import { edgeKey } from "./topology";
-import type { GraphDataLike } from "./types";
+import type { FolderVirtualLinksSettings, GraphDataLike } from "./types";
+
+const DEFAULT_TEST_SETTINGS: FolderVirtualLinksSettings = {
+  excludedFolders: [],
+  folderDepth: "direct",
+  topologyDegree: 3,
+};
 
 function graphData(): GraphDataLike {
   return {
@@ -22,7 +33,7 @@ describe("graph data augmentation", () => {
   it("groups only visible markdown nodes by direct parent without mutating input", () => {
     const original = graphData();
     const before = structuredClone(original);
-    const result = augmentGraphData(original, 3);
+    const result = augmentGraphData(original, DEFAULT_TEST_SETTINGS);
 
     expect(original).toEqual(before);
     expect(result.data.numLinks).toBeGreaterThan(original.numLinks);
@@ -45,11 +56,67 @@ describe("graph data augmentation", () => {
       },
       numLinks: 0,
     };
-    expect(augmentGraphData(original, 3).data).toBe(original);
+    expect(augmentGraphData(original, DEFAULT_TEST_SETTINGS).data).toBe(
+      original,
+    );
   });
 
   it("extracts direct parents including the root", () => {
     expect(directParent("root.md")).toBe("");
     expect(directParent("A/B/note.md")).toBe("A/B");
+  });
+
+  it("groups nested notes at the selected ancestor depth", () => {
+    expect(groupingFolder("A/B/C/note.md", "direct")).toBe("A/B/C");
+    expect(groupingFolder("A/B/C/note.md", 1)).toBe("A");
+    expect(groupingFolder("A/B/C/note.md", 2)).toBe("A/B");
+    expect(groupingFolder("A/note.md", 3)).toBe("A");
+    expect(groupingFolder("root.md", 1)).toBe("");
+  });
+
+  it("clusters nested folders together at a numeric depth", () => {
+    const original: GraphDataLike = {
+      nodes: {
+        "A/one.md": { type: "", links: {} },
+        "A/B/two.md": { type: "", links: {} },
+        "A/C/three.md": { type: "", links: {} },
+      },
+      numLinks: 0,
+    };
+
+    const direct = augmentGraphData(original, DEFAULT_TEST_SETTINGS);
+    const topLevel = augmentGraphData(original, {
+      ...DEFAULT_TEST_SETTINGS,
+      folderDepth: 1,
+    });
+
+    expect(direct.virtualEdgeKeys.size).toBe(0);
+    expect(topLevel.virtualEdgeKeys.size).toBe(3);
+  });
+
+  it("excludes selected folder subtrees before grouping", () => {
+    const original: GraphDataLike = {
+      nodes: {
+        "A/one.md": { type: "", links: {} },
+        "A/B/two.md": { type: "", links: {} },
+        "A/private/secret.md": { type: "", links: {} },
+        "A/private/deep/hidden.md": { type: "", links: {} },
+      },
+      numLinks: 0,
+    };
+    const result = augmentGraphData(original, {
+      ...DEFAULT_TEST_SETTINGS,
+      excludedFolders: ["A/private"],
+      folderDepth: 1,
+    });
+
+    expect(isFolderExcluded("A/private/secret.md", ["A/private"])).toBe(true);
+    expect(isFolderExcluded("A/private/deep/hidden.md", ["A/private"])).toBe(
+      true,
+    );
+    expect(isFolderExcluded("A/private-note.md", ["A/private"])).toBe(false);
+    expect(result.virtualEdgeKeys).toEqual(
+      new Set([edgeKey("A/one.md", "A/B/two.md")]),
+    );
   });
 });

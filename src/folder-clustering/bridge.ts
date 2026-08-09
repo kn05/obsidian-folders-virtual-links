@@ -2,10 +2,10 @@ import type { App, WorkspaceLeaf } from "obsidian";
 import { augmentGraphData } from "./graph-data";
 import { edgeKey } from "./topology";
 import type {
+  FolderVirtualLinksSettings,
   GraphLinkLike,
   GraphRendererLike,
   GraphViewLike,
-  TopologyDegree,
 } from "./types";
 
 interface RendererPatch {
@@ -87,7 +87,7 @@ function refreshView(view: GraphViewLike): void {
 function createRendererPatch(
   view: GraphViewLike,
   renderer: GraphRendererLike,
-  getTopologyDegree: () => TopologyDegree,
+  getSettings: () => Readonly<FolderVirtualLinksSettings>,
 ): RendererPatch {
   const originalSetData = renderer.setData;
   let active = true;
@@ -96,7 +96,7 @@ function createRendererPatch(
     if (!active) return originalSetData.call(renderer, data);
 
     try {
-      const augmented = augmentGraphData(data, getTopologyDegree());
+      const augmented = augmentGraphData(data, getSettings());
       const result = originalSetData.call(renderer, augmented.data);
       stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
       return result;
@@ -122,7 +122,7 @@ export class NativeGraphBridge {
 
   constructor(
     private readonly app: App,
-    private readonly getTopologyDegree: () => TopologyDegree,
+    private readonly getSettings: () => Readonly<FolderVirtualLinksSettings>,
   ) {}
 
   patchOpenGraphs(): void {
@@ -163,7 +163,7 @@ export class NativeGraphBridge {
     for (const [renderer, view] of openGraphs) {
       if (this.patches.has(renderer)) continue;
 
-      const patch = createRendererPatch(view, renderer, this.getTopologyDegree);
+      const patch = createRendererPatch(view, renderer, this.getSettings);
       renderer.setData = patch.wrapper;
       this.patches.set(renderer, patch);
       addedPatches.push(patch);

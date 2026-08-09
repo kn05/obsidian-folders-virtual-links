@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - 2026-08-09
+
+- Add configurable direct-parent or numeric-depth folder grouping.
+- Add a searchable folder picker for excluding folder subtrees.
+- Preserve direct-parent behavior when migrating existing settings.
+
 ## 0.1.1 - 2026-08-09
 
 - Stop topology matching attempts from changing shared adjacency data.

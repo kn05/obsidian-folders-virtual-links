@@ -2,12 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { NativeGraphBridge, stripVirtualLinks } from "./bridge";
 import { edgeKey } from "./topology";
 import type {
+  FolderVirtualLinksSettings,
   GraphDataLike,
   GraphLinkLike,
   GraphNodeLike,
   GraphRendererLike,
   GraphViewLike,
 } from "./types";
+
+const DEFAULT_TEST_SETTINGS: FolderVirtualLinksSettings = {
+  excludedFolders: [],
+  folderDepth: "direct",
+  topologyDegree: 3,
+};
 
 type CompleteGraphNode = GraphNodeLike & {
   forward: Record<string, GraphLinkLike>;
@@ -108,7 +115,10 @@ describe("native graph bridge", () => {
     const app = {
       workspace: { getLeavesOfType: () => [leaf] },
     };
-    const bridge = new NativeGraphBridge(app as never, () => 3);
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
 
     bridge.patchOpenGraphs();
 
@@ -138,7 +148,10 @@ describe("native graph bridge", () => {
     const app = {
       workspace: { getLeavesOfType: () => leaves },
     };
-    const bridge = new NativeGraphBridge(app as never, () => 3);
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
 
     bridge.patchOpenGraphs();
     expect(renderer.setData).not.toBe(originalSetData);
@@ -167,7 +180,10 @@ describe("native graph bridge", () => {
     const app = {
       workspace: { getLeavesOfType: () => [leaf] },
     };
-    const bridge = new NativeGraphBridge(app as never, () => 3);
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
 
     bridge.refreshAll();
 

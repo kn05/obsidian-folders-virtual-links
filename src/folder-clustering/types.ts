@@ -1,6 +1,9 @@
 export type TopologyDegree = 3 | 4;
+export type FolderDepth = "direct" | number;
 
 export interface FolderVirtualLinksSettings {
+  excludedFolders: string[];
+  folderDepth: FolderDepth;
   topologyDegree: TopologyDegree;
 }
 

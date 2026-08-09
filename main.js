@@ -29,9 +29,44 @@ var import_obsidian2 = require("obsidian");
 
 // src/folder-clustering/constants.ts
 var DEFAULT_SETTINGS = {
+  excludedFolders: [],
+  folderDepth: "direct",
   topologyDegree: 3
 };
 var TOPOLOGY_ATTEMPTS = 512;
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function normalizeFolderPath(path) {
+  return path.replace(/^\/+|\/+$/g, "");
+}
+function normalizeFolderDepth(value) {
+  return value === "direct" || typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : DEFAULT_SETTINGS.folderDepth;
+}
+function normalizeTopologyDegree(value) {
+  return value === 4 ? 4 : DEFAULT_SETTINGS.topologyDegree;
+}
+function normalizeExcludedFolders(value) {
+  if (!Array.isArray(value)) return [...DEFAULT_SETTINGS.excludedFolders];
+  const folders = [
+    ...new Set(
+      value.filter((path) => typeof path === "string").map(normalizeFolderPath).filter((path) => path.length > 0)
+    )
+  ].sort(
+    (left, right) => left.split("/").length - right.split("/").length || left.localeCompare(right)
+  );
+  return folders.filter(
+    (folder, index) => !folders.slice(0, index).some((parent) => folder.startsWith(`${parent}/`))
+  );
+}
+function normalizeSettings(stored) {
+  if (!isRecord(stored)) return { ...DEFAULT_SETTINGS, excludedFolders: [] };
+  return {
+    excludedFolders: normalizeExcludedFolders(stored.excludedFolders),
+    folderDepth: normalizeFolderDepth(stored.folderDepth),
+    topologyDegree: normalizeTopologyDegree(stored.topologyDegree)
+  };
+}
 
 // src/folder-clustering/topology.ts
 var EDGE_SEPARATOR = "\0";
@@ -147,12 +182,24 @@ function directParent(path) {
   const separator = path.lastIndexOf("/");
   return separator < 0 ? "" : path.slice(0, separator);
 }
-function markdownFolders(nodes) {
+function groupingFolder(path, folderDepth) {
+  const parent = directParent(path);
+  if (folderDepth === "direct" || parent === "") return parent;
+  return parent.split("/").slice(0, folderDepth).join("/");
+}
+function isFolderExcluded(path, excludedFolders) {
+  const parent = directParent(path);
+  return excludedFolders.some(
+    (folder) => parent === folder || parent.startsWith(`${folder}/`)
+  );
+}
+function markdownFolders(nodes, settings) {
   var _a;
   const folders = /* @__PURE__ */ new Map();
   for (const [path, node] of Object.entries(nodes)) {
     if (node.type !== "") continue;
-    const folder = directParent(path);
+    if (isFolderExcluded(path, settings.excludedFolders)) continue;
+    const folder = groupingFolder(path, settings.folderDepth);
     const members = (_a = folders.get(folder)) != null ? _a : [];
     members.push(path);
     folders.set(folder, members);
@@ -163,18 +210,18 @@ function hasLink(data, source, target) {
   var _a, _b;
   return ((_a = data.nodes[source]) == null ? void 0 : _a.links[target]) === true || ((_b = data.nodes[target]) == null ? void 0 : _b.links[source]) === true;
 }
-function augmentGraphData(original, topologyDegree) {
+function augmentGraphData(original, settings) {
   const nodes = { ...original.nodes };
   const clonedSources = /* @__PURE__ */ new Set();
   const virtualEdgeKeys = /* @__PURE__ */ new Set();
   let addedLinks = 0;
-  const folders = [...markdownFolders(original.nodes)].sort(
+  const folders = [...markdownFolders(original.nodes, settings)].sort(
     ([left], [right]) => left.localeCompare(right)
   );
   for (const [folder, members] of folders) {
     for (const edge of buildFolderTopology(
       members,
-      topologyDegree,
+      settings.topologyDegree,
       folder || "<root>"
     )) {
       if (hasLink(original, edge.source, edge.target)) continue;
@@ -247,13 +294,13 @@ function refreshView(view) {
   }
   (_b = (_a = view.dataEngine) == null ? void 0 : _a.render) == null ? void 0 : _b.call(_a);
 }
-function createRendererPatch(view, renderer, getTopologyDegree) {
+function createRendererPatch(view, renderer, getSettings) {
   const originalSetData = renderer.setData;
   let active = true;
   const wrapper = (data) => {
     if (!active) return originalSetData.call(renderer, data);
     try {
-      const augmented = augmentGraphData(data, getTopologyDegree());
+      const augmented = augmentGraphData(data, getSettings());
       const result = originalSetData.call(renderer, augmented.data);
       stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
       return result;
@@ -273,9 +320,9 @@ function createRendererPatch(view, renderer, getTopologyDegree) {
   };
 }
 var NativeGraphBridge = class {
-  constructor(app, getTopologyDegree) {
+  constructor(app, getSettings) {
     __publicField(this, "app", app);
-    __publicField(this, "getTopologyDegree", getTopologyDegree);
+    __publicField(this, "getSettings", getSettings);
     __publicField(this, "patches", /* @__PURE__ */ new Map());
   }
   patchOpenGraphs() {
@@ -309,7 +356,7 @@ var NativeGraphBridge = class {
     const addedPatches = [];
     for (const [renderer, view] of openGraphs) {
       if (this.patches.has(renderer)) continue;
-      const patch = createRendererPatch(view, renderer, this.getTopologyDegree);
+      const patch = createRendererPatch(view, renderer, this.getSettings);
       renderer.setData = patch.wrapper;
       this.patches.set(renderer, patch);
       addedPatches.push(patch);
@@ -328,19 +375,99 @@ var NativeGraphBridge = class {
 
 // src/folder-clustering/settings.ts
 var import_obsidian = require("obsidian");
+var FolderSuggestModal = class extends import_obsidian.SuggestModal {
+  constructor(app, folderPaths, onChoose) {
+    super(app);
+    __publicField(this, "folderPaths", folderPaths);
+    __publicField(this, "onChoose", onChoose);
+    this.setPlaceholder("Search folders");
+    this.emptyStateText = "No folders available";
+  }
+  getSuggestions(query) {
+    const normalizedQuery = query.toLocaleLowerCase();
+    return this.folderPaths.filter(
+      (path) => path.toLocaleLowerCase().includes(normalizedQuery)
+    );
+  }
+  renderSuggestion(folderPath, element) {
+    element.setText(folderPath);
+  }
+  onChooseSuggestion(folderPath) {
+    void this.onChoose(folderPath);
+  }
+};
+function folderDepthOptions(folderPaths, currentDepth) {
+  const maxVaultDepth = Math.max(
+    1,
+    ...folderPaths.map((path) => path.split("/").length)
+  );
+  const maxDepth = typeof currentDepth === "number" ? Math.max(currentDepth, maxVaultDepth) : maxVaultDepth;
+  const options = /* @__PURE__ */ new Map([["direct", "Direct parent (default)"]]);
+  for (let depth = 1; depth <= maxDepth; depth += 1) {
+    options.set(String(depth), depth === 1 ? "1 (top level)" : String(depth));
+  }
+  return options;
+}
+function isCoveredByExclusion(folderPath, excludedFolders) {
+  return excludedFolders.some(
+    (excluded) => folderPath === excluded || folderPath.startsWith(`${excluded}/`)
+  );
+}
 var FolderVirtualLinksSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     __publicField(this, "plugin", plugin);
   }
   display() {
+    this.renderSettings();
+  }
+  renderSettings() {
     this.containerEl.empty();
+    const folderPaths = this.app.vault.getAllFolders().map((folder) => folder.path).sort((left, right) => left.localeCompare(right));
     new import_obsidian.Setting(this.containerEl).setName("Folder topology degree").setDesc("Higher values pull notes in the same folder closer.").addDropdown((dropdown) => {
       dropdown.addOption("3", "3 (default)").addOption("4", "4 (strong)").setValue(String(this.plugin.settings.topologyDegree)).onChange(async (value) => {
         const topologyDegree = value === "4" ? 4 : 3;
         await this.plugin.updateTopologyDegree(topologyDegree);
       });
     });
+    new import_obsidian.Setting(this.containerEl).setName("Folder grouping depth").setDesc(
+      "Choose which ancestor folder groups nested notes. Direct parent keeps each folder separate."
+    ).addDropdown((dropdown) => {
+      for (const [value, label] of folderDepthOptions(
+        folderPaths,
+        this.plugin.settings.folderDepth
+      )) {
+        dropdown.addOption(value, label);
+      }
+      dropdown.setValue(String(this.plugin.settings.folderDepth)).onChange(async (value) => {
+        const numericDepth = Number(value);
+        const folderDepth = value === "direct" || !Number.isSafeInteger(numericDepth) ? "direct" : numericDepth;
+        await this.plugin.updateFolderDepth(folderDepth);
+      });
+    });
+    new import_obsidian.Setting(this.containerEl).setName("Excluded folders").setDesc("Ignore selected folders and all their subfolders.").addButton((button) => {
+      button.setButtonText("Add folder").onClick(() => {
+        const availableFolders = folderPaths.filter(
+          (path) => !isCoveredByExclusion(path, this.plugin.settings.excludedFolders)
+        );
+        new FolderSuggestModal(
+          this.app,
+          availableFolders,
+          async (folderPath) => {
+            await this.plugin.addExcludedFolder(folderPath);
+            this.renderSettings();
+          }
+        ).open();
+      });
+    });
+    for (const folderPath of this.plugin.settings.excludedFolders) {
+      new import_obsidian.Setting(this.containerEl).setName(folderPath).addExtraButton((button) => {
+        button.setIcon("x").setTooltip(`Remove ${folderPath}`).onClick(async () => {
+          await this.plugin.removeExcludedFolder(folderPath);
+          this.renderSettings();
+        });
+      });
+    }
   }
 };
 
@@ -348,17 +475,17 @@ var FolderVirtualLinksSettingTab = class extends import_obsidian.PluginSettingTa
 var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
   constructor() {
     super(...arguments);
-    __publicField(this, "settings", { ...DEFAULT_SETTINGS });
+    __publicField(this, "settings", {
+      ...DEFAULT_SETTINGS,
+      excludedFolders: []
+    });
     __publicField(this, "bridge");
     __publicField(this, "isActive", false);
   }
   async onload() {
     this.isActive = true;
     await this.loadSettings();
-    this.bridge = new NativeGraphBridge(
-      this.app,
-      () => this.settings.topologyDegree
-    );
+    this.bridge = new NativeGraphBridge(this.app, () => this.settings);
     this.addSettingTab(new FolderVirtualLinksSettingTab(this.app, this));
     this.addCommand({
       id: "rebuild-folder-virtual-links",
@@ -389,15 +516,30 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
     this.bridge = void 0;
   }
   async updateTopologyDegree(topologyDegree) {
-    var _a;
-    this.settings.topologyDegree = topologyDegree;
-    await this.saveData(this.settings);
-    (_a = this.bridge) == null ? void 0 : _a.refreshAll();
+    await this.updateSettings({ topologyDegree });
+  }
+  async updateFolderDepth(folderDepth) {
+    await this.updateSettings({ folderDepth });
+  }
+  async addExcludedFolder(folderPath) {
+    await this.updateSettings({
+      excludedFolders: [...this.settings.excludedFolders, folderPath]
+    });
+  }
+  async removeExcludedFolder(folderPath) {
+    await this.updateSettings({
+      excludedFolders: this.settings.excludedFolders.filter(
+        (path) => path !== folderPath
+      )
+    });
   }
   async loadSettings() {
-    const stored = await this.loadData();
-    this.settings = {
-      topologyDegree: (stored == null ? void 0 : stored.topologyDegree) === 4 ? 4 : DEFAULT_SETTINGS.topologyDegree
-    };
+    this.settings = normalizeSettings(await this.loadData());
+  }
+  async updateSettings(updates) {
+    var _a;
+    this.settings = normalizeSettings({ ...this.settings, ...updates });
+    await this.saveData(this.settings);
+    (_a = this.bridge) == null ? void 0 : _a.refreshAll();
   }
 };

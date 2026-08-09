@@ -1,24 +1,28 @@
 import { Plugin } from "obsidian";
 import { NativeGraphBridge } from "./folder-clustering/bridge";
-import { DEFAULT_SETTINGS } from "./folder-clustering/constants";
+import {
+  DEFAULT_SETTINGS,
+  normalizeSettings,
+} from "./folder-clustering/constants";
 import { FolderVirtualLinksSettingTab } from "./folder-clustering/settings";
 import type {
+  FolderDepth,
   FolderVirtualLinksSettings,
   TopologyDegree,
 } from "./folder-clustering/types";
 
 export default class FolderVirtualLinksPlugin extends Plugin {
-  override settings: FolderVirtualLinksSettings = { ...DEFAULT_SETTINGS };
+  override settings: FolderVirtualLinksSettings = {
+    ...DEFAULT_SETTINGS,
+    excludedFolders: [],
+  };
   private bridge: NativeGraphBridge | undefined;
   private isActive = false;
 
   override async onload(): Promise<void> {
     this.isActive = true;
     await this.loadSettings();
-    this.bridge = new NativeGraphBridge(
-      this.app,
-      () => this.settings.topologyDegree,
-    );
+    this.bridge = new NativeGraphBridge(this.app, () => this.settings);
     this.addSettingTab(new FolderVirtualLinksSettingTab(this.app, this));
 
     this.addCommand({
@@ -44,17 +48,36 @@ export default class FolderVirtualLinksPlugin extends Plugin {
   }
 
   async updateTopologyDegree(topologyDegree: TopologyDegree): Promise<void> {
-    this.settings.topologyDegree = topologyDegree;
-    await this.saveData(this.settings);
-    this.bridge?.refreshAll();
+    await this.updateSettings({ topologyDegree });
+  }
+
+  async updateFolderDepth(folderDepth: FolderDepth): Promise<void> {
+    await this.updateSettings({ folderDepth });
+  }
+
+  async addExcludedFolder(folderPath: string): Promise<void> {
+    await this.updateSettings({
+      excludedFolders: [...this.settings.excludedFolders, folderPath],
+    });
+  }
+
+  async removeExcludedFolder(folderPath: string): Promise<void> {
+    await this.updateSettings({
+      excludedFolders: this.settings.excludedFolders.filter(
+        (path) => path !== folderPath,
+      ),
+    });
   }
 
   private async loadSettings(): Promise<void> {
-    const stored =
-      (await this.loadData()) as Partial<FolderVirtualLinksSettings> | null;
-    this.settings = {
-      topologyDegree:
-        stored?.topologyDegree === 4 ? 4 : DEFAULT_SETTINGS.topologyDegree,
-    };
+    this.settings = normalizeSettings(await this.loadData());
+  }
+
+  private async updateSettings(
+    updates: Partial<FolderVirtualLinksSettings>,
+  ): Promise<void> {
+    this.settings = normalizeSettings({ ...this.settings, ...updates });
+    await this.saveData(this.settings);
+    this.bridge?.refreshAll();
   }
 }

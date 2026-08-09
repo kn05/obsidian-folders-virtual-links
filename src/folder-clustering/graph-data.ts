@@ -1,5 +1,10 @@
 import { buildFolderTopology, edgeKey } from "./topology";
-import type { GraphDataLike, GraphNodeDataLike, TopologyDegree } from "./types";
+import type {
+  FolderDepth,
+  FolderVirtualLinksSettings,
+  GraphDataLike,
+  GraphNodeDataLike,
+} from "./types";
 
 export interface AugmentedGraphData {
   data: GraphDataLike;
@@ -11,13 +16,31 @@ export function directParent(path: string): string {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
+export function groupingFolder(path: string, folderDepth: FolderDepth): string {
+  const parent = directParent(path);
+  if (folderDepth === "direct" || parent === "") return parent;
+  return parent.split("/").slice(0, folderDepth).join("/");
+}
+
+export function isFolderExcluded(
+  path: string,
+  excludedFolders: readonly string[],
+): boolean {
+  const parent = directParent(path);
+  return excludedFolders.some(
+    (folder) => parent === folder || parent.startsWith(`${folder}/`),
+  );
+}
+
 function markdownFolders(
   nodes: Readonly<Record<string, GraphNodeDataLike>>,
+  settings: Readonly<FolderVirtualLinksSettings>,
 ): Map<string, string[]> {
   const folders = new Map<string, string[]>();
   for (const [path, node] of Object.entries(nodes)) {
     if (node.type !== "") continue;
-    const folder = directParent(path);
+    if (isFolderExcluded(path, settings.excludedFolders)) continue;
+    const folder = groupingFolder(path, settings.folderDepth);
     const members = folders.get(folder) ?? [];
     members.push(path);
     folders.set(folder, members);
@@ -34,21 +57,21 @@ function hasLink(data: GraphDataLike, source: string, target: string): boolean {
 
 export function augmentGraphData(
   original: GraphDataLike,
-  topologyDegree: TopologyDegree,
+  settings: Readonly<FolderVirtualLinksSettings>,
 ): AugmentedGraphData {
   const nodes = { ...original.nodes };
   const clonedSources = new Set<string>();
   const virtualEdgeKeys = new Set<string>();
   let addedLinks = 0;
 
-  const folders = [...markdownFolders(original.nodes)].sort(([left], [right]) =>
-    left.localeCompare(right),
+  const folders = [...markdownFolders(original.nodes, settings)].sort(
+    ([left], [right]) => left.localeCompare(right),
   );
 
   for (const [folder, members] of folders) {
     for (const edge of buildFolderTopology(
       members,
-      topologyDegree,
+      settings.topologyDegree,
       folder || "<root>",
     )) {
       if (hasLink(original, edge.source, edge.target)) continue;
