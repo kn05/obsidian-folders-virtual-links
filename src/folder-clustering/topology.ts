@@ -50,7 +50,7 @@ function addEdge(
   edges: VirtualEdge[],
   adjacency: Map<string, Set<string>>,
   source: string,
-  target: string
+  target: string,
 ): boolean {
   if (source === target || adjacency.get(source)?.has(target)) return false;
   adjacency.get(source)?.add(target);
@@ -62,8 +62,11 @@ function addEdge(
 function clique(paths: readonly string[]): VirtualEdge[] {
   const edges: VirtualEdge[] = [];
   for (let left = 0; left < paths.length; left += 1) {
-    for (let right = left + 1; right < paths.length; right += 1) {
-      edges.push({ source: paths[left] as string, target: paths[right] as string });
+    const source = paths[left];
+    if (source === undefined) continue;
+
+    for (const target of paths.slice(left + 1)) {
+      edges.push({ source, target });
     }
   }
   return edges;
@@ -73,7 +76,7 @@ function makeStubs(
   paths: readonly string[],
   adjacency: ReadonlyMap<string, ReadonlySet<string>>,
   targetDegree: number,
-  parityNode: string | undefined
+  parityNode: string | undefined,
 ): string[] {
   const stubs: string[] = [];
   for (const path of paths) {
@@ -84,12 +87,11 @@ function makeStubs(
   return stubs;
 }
 
-function addStubPairs(
-  edges: VirtualEdge[],
+function tryBuildStubEdges(
   baseAdjacency: ReadonlyMap<string, ReadonlySet<string>>,
   stubs: readonly string[],
-  seed: number
-): boolean {
+  seed: number,
+): VirtualEdge[] | undefined {
   const candidateAdjacency = new Map<string, Set<string>>();
   for (const [path, neighbors] of baseAdjacency) {
     candidateAdjacency.set(path, new Set(neighbors));
@@ -100,28 +102,21 @@ function addStubPairs(
   for (let index = 0; index < candidates.length; index += 2) {
     const source = candidates[index];
     const target = candidates[index + 1];
-    if (source === undefined || target === undefined) return false;
-    if (!addEdge(candidateEdges, candidateAdjacency, source, target)) return false;
+    if (source === undefined || target === undefined) return undefined;
+    if (!addEdge(candidateEdges, candidateAdjacency, source, target))
+      return undefined;
   }
 
-  edges.push(...candidateEdges);
-  for (const [path, neighbors] of candidateAdjacency) {
-    const destination = baseAdjacency.get(path);
-    if (destination instanceof Set) {
-      destination.clear();
-      for (const neighbor of neighbors) destination.add(neighbor);
-    }
-  }
-  return true;
+  return candidateEdges;
 }
 
 export function buildFolderTopology(
   memberPaths: readonly string[],
   requestedDegree: TopologyDegree,
-  folderSeed: string
+  folderSeed: string,
 ): VirtualEdge[] {
   const paths = [...new Set(memberPaths)].sort((left, right) =>
-    compareBySalt(left, right, `${folderSeed}:cycle`)
+    compareBySalt(left, right, `${folderSeed}:cycle`),
   );
   const nodeCount = paths.length;
   if (nodeCount < 2) return [];
@@ -131,13 +126,9 @@ export function buildFolderTopology(
 
   const adjacency = new Map(paths.map((path) => [path, new Set<string>()]));
   const edges: VirtualEdge[] = [];
-  for (let index = 0; index < nodeCount; index += 1) {
-    addEdge(
-      edges,
-      adjacency,
-      paths[index] as string,
-      paths[(index + 1) % nodeCount] as string
-    );
+  for (const [index, source] of paths.entries()) {
+    const target = paths[(index + 1) % nodeCount];
+    if (target !== undefined) addEdge(edges, adjacency, source, target);
   }
   if (targetDegree <= 2) return edges;
 
@@ -146,9 +137,10 @@ export function buildFolderTopology(
   const stubs = makeStubs(paths, adjacency, targetDegree, parityNode);
 
   for (let attempt = 0; attempt < TOPOLOGY_ATTEMPTS; attempt += 1) {
-    const attemptSeed = hash32(`${folderSeed}:matching:${attempt}`);
-    if (addStubPairs(edges, adjacency, stubs, attemptSeed)) return edges;
+    const attemptSeed = hash32(`${folderSeed}:matching:${String(attempt)}`);
+    const stubEdges = tryBuildStubEdges(adjacency, stubs, attemptSeed);
+    if (stubEdges !== undefined) return edges.concat(stubEdges);
   }
 
-  throw new Error(`Could not construct folder topology for ${folderSeed}`);
+  throw new Error(`Could not build folder topology: ${folderSeed}`);
 }

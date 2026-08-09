@@ -22,21 +22,21 @@ export interface GraphDataLike {
 
 export interface GraphNodeLike {
   id: string;
-  forward: Record<string, GraphLinkLike>;
-  reverse: Record<string, GraphLinkLike>;
+  forward?: Record<string, GraphLinkLike>;
+  reverse?: Record<string, GraphLinkLike>;
   weight: number;
 }
 
 export interface GraphLinkLike {
-  source: GraphNodeLike;
-  target: GraphNodeLike;
+  source?: GraphNodeLike;
+  target?: GraphNodeLike;
   rendered?: boolean;
   clearGraphics?: () => void;
 }
 
 export interface GraphRendererLike {
-  links: GraphLinkLike[];
-  nodes: GraphNodeLike[];
+  links?: GraphLinkLike[];
+  nodes?: GraphNodeLike[];
   setData: (data: GraphDataLike) => unknown;
   changed?: () => void;
 }

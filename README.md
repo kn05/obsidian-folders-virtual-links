@@ -1,25 +1,22 @@
 # Folder Virtual Links
 
-Folder Virtual Links makes notes in the same folder settle into natural clusters
-inside Obsidian's native global graph view. It adds deterministic virtual springs
-to the graph simulation without writing links into notes or changing the metadata
-cache.
+Folder Virtual Links groups notes from the same folder in Obsidian's global graph.
+It adds deterministic virtual links to the graph simulation without changing notes
+or metadata.
 
-The virtual links are not drawn and do not appear as hover relationships. The
-native graph still owns rendering, dragging, pan/zoom, filters, colors, and its
-fluid layout animation.
+Virtual links are not drawn and do not appear in hover relationships. Obsidian
+still controls rendering, dragging, pan and zoom, filters, colors, and animation.
 
 ## How it clusters
 
-Each direct parent folder receives a connected, hub-free sparse topology. A
-seeded cycle guarantees connectivity, and deterministic matching edges bring the
-folder topology to degree 3 by default. Degree 4 is available in settings for a
-stronger pull. See [ADR 0001](docs/decisions/0001-folder-clustering-topology.md)
-for the algorithm choice and rejected alternatives.
+Each direct parent folder receives a connected sparse topology without a hub. A
+seeded cycle connects the notes. Deterministic matching edges produce degree 3 by
+default. Degree 4 is available for tighter clusters. See
+[ADR 0001](docs/decisions/0001-folder-clustering-topology.md) for the algorithm.
 
 Virtual springs use Obsidian's current global link distance and link strength.
-The internal worker does not expose a separate per-link spring strength, so the
-plugin controls the additional attraction through sparse degree instead.
+The worker has no per-link spring setting. The topology degree controls the added
+attraction.
 
 ## Install with BRAT
 
@@ -29,9 +26,8 @@ plugin controls the additional attraction through sparse degree instead.
 4. Enable **Folder Virtual Links** in Community plugins.
 5. Open or refresh the global graph view.
 
-Use **Settings → Folder Virtual Links → Folder topology degree** to choose
-degree 3 or 4. The command **Rebuild folder virtual links** restarts the graph
-with the current setting.
+Use **Settings > Folder Virtual Links > Folder topology degree** to choose degree
+3 or 4. **Rebuild folder virtual links** applies the current setting.
 
 ## Safety and scope
 
@@ -43,10 +39,9 @@ with the current setting.
 
 ## Compatibility
 
-Obsidian does not provide a public graph-renderer API, so this plugin uses a small,
-guarded integration with the native renderer. If that internal shape changes, the
-plugin fails open and leaves the native graph unmodified. Compatibility is tested
-against the current public Obsidian release for each plugin release.
+Obsidian has no public graph renderer API. This plugin uses a guarded integration
+with the native renderer. If the renderer interface changes, the plugin leaves
+the native graph data unchanged.
 
 ## Development
 
@@ -57,3 +52,5 @@ npm run build
 ```
 
 The BRAT release assets are `main.js`, `manifest.json`, and `styles.css`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for code and release conventions.

@@ -6,10 +6,15 @@ import type {
   GraphLinkLike,
   GraphNodeLike,
   GraphRendererLike,
-  GraphViewLike
+  GraphViewLike,
 } from "./types";
 
-function node(id: string): GraphNodeLike {
+type CompleteGraphNode = GraphNodeLike & {
+  forward: Record<string, GraphLinkLike>;
+  reverse: Record<string, GraphLinkLike>;
+};
+
+function node(id: string): CompleteGraphNode {
   return { id, forward: {}, reverse: {}, weight: 0 };
 }
 
@@ -19,7 +24,12 @@ describe("native graph bridge", () => {
     const b = node("folder/b.md");
     const c = node("other/c.md");
     const clearVirtual = vi.fn();
-    const virtual = { source: a, target: b, rendered: true, clearGraphics: clearVirtual };
+    const virtual = {
+      source: a,
+      target: b,
+      rendered: true,
+      clearGraphics: clearVirtual,
+    };
     const real = { source: a, target: c, rendered: true };
     a.forward[b.id] = virtual;
     b.reverse[a.id] = virtual;
@@ -30,7 +40,7 @@ describe("native graph bridge", () => {
       links: [virtual, real],
       nodes: [a, b, c],
       setData: () => undefined,
-      changed
+      changed,
     } satisfies GraphRendererLike;
 
     stripVirtualLinks(renderer, new Set([edgeKey(a.id, b.id)]));
@@ -50,7 +60,7 @@ describe("native graph bridge", () => {
     const renderer: GraphRendererLike = {
       links: [link],
       nodes: [a, b],
-      setData: () => undefined
+      setData: () => undefined,
     };
     stripVirtualLinks(renderer, new Set());
     expect(renderer.links).toEqual([link]);
@@ -61,9 +71,9 @@ describe("native graph bridge", () => {
       nodes: {
         "folder/a.md": { type: "", links: {} },
         "folder/b.md": { type: "", links: {} },
-        "folder/c.md": { type: "", links: {} }
+        "folder/c.md": { type: "", links: {} },
       },
-      numLinks: 0
+      numLinks: 0,
     };
     let received: GraphDataLike | undefined;
     const renderer: GraphRendererLike = {
@@ -72,27 +82,31 @@ describe("native graph bridge", () => {
       setData(next) {
         received = next;
         const byId = Object.fromEntries(
-          Object.keys(next.nodes).map((id) => [id, node(id)])
-        ) as Record<string, GraphNodeLike>;
+          Object.keys(next.nodes).map((id) => [id, node(id)]),
+        ) as Record<string, CompleteGraphNode>;
         this.nodes = Object.values(byId);
-        this.links = [];
+        const links: GraphLinkLike[] = [];
+        this.links = links;
         for (const [sourceId, sourceData] of Object.entries(next.nodes)) {
           for (const targetId of Object.keys(sourceData.links)) {
-            const source = byId[sourceId] as GraphNodeLike;
-            const target = byId[targetId] as GraphNodeLike;
+            const source = byId[sourceId];
+            const target = byId[targetId];
+            if (source === undefined || target === undefined) {
+              throw new Error("Test graph link references an unknown node");
+            }
             const link: GraphLinkLike = { source, target };
             source.forward[targetId] = link;
             target.reverse[sourceId] = link;
-            this.links.push(link);
+            links.push(link);
           }
         }
-      }
+      },
     };
     const view: GraphViewLike = { renderer };
     view.update = () => renderer.setData(data);
     const leaf = { view: { getViewType: () => "graph", ...view } };
     const app = {
-      workspace: { getLeavesOfType: () => [leaf] }
+      workspace: { getLeavesOfType: () => [leaf] },
     };
     const bridge = new NativeGraphBridge(app as never, () => 3);
 
@@ -103,5 +117,60 @@ describe("native graph bridge", () => {
     expect(data.numLinks).toBe(0);
     bridge.dispose();
     expect(received).toBe(data);
+  });
+
+  it("restores a renderer when its graph view closes", () => {
+    const originalSetData = vi.fn();
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      setData: originalSetData,
+    };
+    const update = vi.fn();
+    const leaf = {
+      view: {
+        getViewType: () => "graph",
+        renderer,
+        update,
+      },
+    };
+    let leaves = [leaf];
+    const app = {
+      workspace: { getLeavesOfType: () => leaves },
+    };
+    const bridge = new NativeGraphBridge(app as never, () => 3);
+
+    bridge.patchOpenGraphs();
+    expect(renderer.setData).not.toBe(originalSetData);
+    expect(update).toHaveBeenCalledOnce();
+
+    leaves = [];
+    bridge.patchOpenGraphs();
+    expect(renderer.setData).toBe(originalSetData);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes a newly patched view once during a rebuild", () => {
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      setData: vi.fn(),
+    };
+    const update = vi.fn();
+    const leaf = {
+      view: {
+        getViewType: () => "graph",
+        renderer,
+        update,
+      },
+    };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(app as never, () => 3);
+
+    bridge.refreshAll();
+
+    expect(update).toHaveBeenCalledOnce();
   });
 });

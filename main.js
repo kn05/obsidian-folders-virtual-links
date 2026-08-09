@@ -82,8 +82,10 @@ function addEdge(edges, adjacency, source, target) {
 function clique(paths) {
   const edges = [];
   for (let left = 0; left < paths.length; left += 1) {
-    for (let right = left + 1; right < paths.length; right += 1) {
-      edges.push({ source: paths[left], target: paths[right] });
+    const source = paths[left];
+    if (source === void 0) continue;
+    for (const target of paths.slice(left + 1)) {
+      edges.push({ source, target });
     }
   }
   return edges;
@@ -98,7 +100,7 @@ function makeStubs(paths, adjacency, targetDegree, parityNode) {
   }
   return stubs;
 }
-function addStubPairs(edges, baseAdjacency, stubs, seed) {
+function tryBuildStubEdges(baseAdjacency, stubs, seed) {
   const candidateAdjacency = /* @__PURE__ */ new Map();
   for (const [path, neighbors] of baseAdjacency) {
     candidateAdjacency.set(path, new Set(neighbors));
@@ -108,18 +110,11 @@ function addStubPairs(edges, baseAdjacency, stubs, seed) {
   for (let index = 0; index < candidates.length; index += 2) {
     const source = candidates[index];
     const target = candidates[index + 1];
-    if (source === void 0 || target === void 0) return false;
-    if (!addEdge(candidateEdges, candidateAdjacency, source, target)) return false;
+    if (source === void 0 || target === void 0) return void 0;
+    if (!addEdge(candidateEdges, candidateAdjacency, source, target))
+      return void 0;
   }
-  edges.push(...candidateEdges);
-  for (const [path, neighbors] of candidateAdjacency) {
-    const destination = baseAdjacency.get(path);
-    if (destination instanceof Set) {
-      destination.clear();
-      for (const neighbor of neighbors) destination.add(neighbor);
-    }
-  }
-  return true;
+  return candidateEdges;
 }
 function buildFolderTopology(memberPaths, requestedDegree, folderSeed) {
   const paths = [...new Set(memberPaths)].sort(
@@ -131,23 +126,20 @@ function buildFolderTopology(memberPaths, requestedDegree, folderSeed) {
   if (targetDegree === nodeCount - 1) return clique(paths);
   const adjacency = new Map(paths.map((path) => [path, /* @__PURE__ */ new Set()]));
   const edges = [];
-  for (let index = 0; index < nodeCount; index += 1) {
-    addEdge(
-      edges,
-      adjacency,
-      paths[index],
-      paths[(index + 1) % nodeCount]
-    );
+  for (const [index, source] of paths.entries()) {
+    const target = paths[(index + 1) % nodeCount];
+    if (target !== void 0) addEdge(edges, adjacency, source, target);
   }
   if (targetDegree <= 2) return edges;
   const needsParityNode = nodeCount * targetDegree % 2 === 1;
   const parityNode = needsParityNode ? paths[0] : void 0;
   const stubs = makeStubs(paths, adjacency, targetDegree, parityNode);
   for (let attempt = 0; attempt < TOPOLOGY_ATTEMPTS; attempt += 1) {
-    const attemptSeed = hash32(`${folderSeed}:matching:${attempt}`);
-    if (addStubPairs(edges, adjacency, stubs, attemptSeed)) return edges;
+    const attemptSeed = hash32(`${folderSeed}:matching:${String(attempt)}`);
+    const stubEdges = tryBuildStubEdges(adjacency, stubs, attemptSeed);
+    if (stubEdges !== void 0) return edges.concat(stubEdges);
   }
-  throw new Error(`Could not construct folder topology for ${folderSeed}`);
+  throw new Error(`Could not build folder topology: ${folderSeed}`);
 }
 
 // src/folder-clustering/graph-data.ts
@@ -180,7 +172,11 @@ function augmentGraphData(original, topologyDegree) {
     ([left], [right]) => left.localeCompare(right)
   );
   for (const [folder, members] of folders) {
-    for (const edge of buildFolderTopology(members, topologyDegree, folder || "<root>")) {
+    for (const edge of buildFolderTopology(
+      members,
+      topologyDegree,
+      folder || "<root>"
+    )) {
       if (hasLink(original, edge.source, edge.target)) continue;
       if (!clonedSources.has(edge.source)) {
         const sourceNode2 = original.nodes[edge.source];
@@ -189,7 +185,8 @@ function augmentGraphData(original, topologyDegree) {
         clonedSources.add(edge.source);
       }
       const sourceNode = nodes[edge.source];
-      if (sourceNode === void 0 || sourceNode.links[edge.target] === true) continue;
+      if (sourceNode === void 0 || sourceNode.links[edge.target] === true)
+        continue;
       sourceNode.links[edge.target] = true;
       virtualEdgeKeys.add(edgeKey(edge.source, edge.target));
       addedLinks += 1;
@@ -203,35 +200,40 @@ function augmentGraphData(original, topologyDegree) {
 
 // src/folder-clustering/bridge.ts
 function deleteLinkReference(lookup, id, link) {
-  if ((lookup == null ? void 0 : lookup[id]) === link) delete lookup[id];
+  if ((lookup == null ? void 0 : lookup[id]) === link) Reflect.deleteProperty(lookup, id);
 }
 function stripVirtualLinks(renderer, virtualEdgeKeys) {
-  var _a, _b, _c, _d, _e, _f, _g;
+  var _a, _b, _c, _d, _e;
   if (virtualEdgeKeys.size === 0 || !Array.isArray(renderer.links)) return;
   const visibleLinks = [];
   for (const link of renderer.links) {
-    const sourceId = (_a = link.source) == null ? void 0 : _a.id;
-    const targetId = (_b = link.target) == null ? void 0 : _b.id;
-    if (typeof sourceId !== "string" || typeof targetId !== "string" || !virtualEdgeKeys.has(edgeKey(sourceId, targetId))) {
+    const source = link.source;
+    const target = link.target;
+    const sourceId = source == null ? void 0 : source.id;
+    const targetId = target == null ? void 0 : target.id;
+    if (source === void 0 || target === void 0 || typeof sourceId !== "string" || typeof targetId !== "string" || !virtualEdgeKeys.has(edgeKey(sourceId, targetId))) {
       visibleLinks.push(link);
       continue;
     }
     try {
-      (_c = link.clearGraphics) == null ? void 0 : _c.call(link);
+      (_a = link.clearGraphics) == null ? void 0 : _a.call(link);
     } catch (error) {
-      console.warn("Folder Virtual Links could not clear hidden link graphics", error);
+      console.warn(
+        "Folder Virtual Links could not clear hidden link graphics",
+        error
+      );
     }
     link.rendered = false;
-    deleteLinkReference(link.source.forward, targetId, link);
-    deleteLinkReference(link.source.reverse, targetId, link);
-    deleteLinkReference(link.target.forward, sourceId, link);
-    deleteLinkReference(link.target.reverse, sourceId, link);
+    deleteLinkReference(source.forward, targetId, link);
+    deleteLinkReference(source.reverse, targetId, link);
+    deleteLinkReference(target.forward, sourceId, link);
+    deleteLinkReference(target.reverse, sourceId, link);
   }
   renderer.links.splice(0, renderer.links.length, ...visibleLinks);
-  for (const node of (_d = renderer.nodes) != null ? _d : []) {
-    node.weight = Object.keys((_e = node.forward) != null ? _e : {}).length + Object.keys((_f = node.reverse) != null ? _f : {}).length;
+  for (const node of (_b = renderer.nodes) != null ? _b : []) {
+    node.weight = Object.keys((_c = node.forward) != null ? _c : {}).length + Object.keys((_d = node.reverse) != null ? _d : {}).length;
   }
-  (_g = renderer.changed) == null ? void 0 : _g.call(renderer);
+  (_e = renderer.changed) == null ? void 0 : _e.call(renderer);
 }
 function asGraphView(leaf) {
   if (leaf.view.getViewType() !== "graph") return void 0;
@@ -245,6 +247,31 @@ function refreshView(view) {
   }
   (_b = (_a = view.dataEngine) == null ? void 0 : _a.render) == null ? void 0 : _b.call(_a);
 }
+function createRendererPatch(view, renderer, getTopologyDegree) {
+  const originalSetData = renderer.setData;
+  let active = true;
+  const wrapper = (data) => {
+    if (!active) return originalSetData.call(renderer, data);
+    try {
+      const augmented = augmentGraphData(data, getTopologyDegree());
+      const result = originalSetData.call(renderer, augmented.data);
+      stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
+      return result;
+    } catch (error) {
+      console.error("Folder Virtual Links could not update the graph", error);
+      return originalSetData.call(renderer, data);
+    }
+  };
+  return {
+    deactivate: () => {
+      active = false;
+    },
+    originalSetData,
+    renderer,
+    view,
+    wrapper
+  };
+}
 var NativeGraphBridge = class {
   constructor(app, getTopologyDegree) {
     __publicField(this, "app", app);
@@ -252,54 +279,50 @@ var NativeGraphBridge = class {
     __publicField(this, "patches", /* @__PURE__ */ new Map());
   }
   patchOpenGraphs() {
-    for (const leaf of this.app.workspace.getLeavesOfType("graph")) {
-      const view = asGraphView(leaf);
-      const renderer = view == null ? void 0 : view.renderer;
-      if (view === void 0 || renderer === void 0 || this.patches.has(renderer)) continue;
-      if (typeof renderer.setData !== "function") continue;
-      const patch = this.patchRenderer(view, renderer);
-      this.patches.set(renderer, patch);
-      refreshView(view);
+    for (const patch of this.reconcileOpenGraphs()) {
+      refreshView(patch.view);
     }
   }
   refreshAll() {
-    this.patchOpenGraphs();
+    this.reconcileOpenGraphs();
     for (const patch of this.patches.values()) {
-      if (patch.active) refreshView(patch.view);
+      refreshView(patch.view);
     }
   }
   dispose() {
-    for (const patch of this.patches.values()) {
-      patch.active = false;
-      if (patch.renderer.setData === patch.wrapper) {
-        patch.renderer.setData = patch.originalSetData;
-      }
-      refreshView(patch.view);
+    for (const patch of [...this.patches.values()]) {
+      this.releasePatch(patch, true);
     }
-    this.patches.clear();
   }
-  patchRenderer(view, renderer) {
-    const originalSetData = renderer.setData;
-    const patch = {
-      active: true,
-      originalSetData,
-      renderer,
-      view
-    };
-    patch.wrapper = (data) => {
-      if (!patch.active) return originalSetData.call(renderer, data);
-      try {
-        const augmented = augmentGraphData(data, this.getTopologyDegree());
-        const result = originalSetData.call(renderer, augmented.data);
-        stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
-        return result;
-      } catch (error) {
-        console.error("Folder Virtual Links disabled clustering for this graph update", error);
-        return originalSetData.call(renderer, data);
-      }
-    };
-    renderer.setData = patch.wrapper;
-    return patch;
+  reconcileOpenGraphs() {
+    const openGraphs = /* @__PURE__ */ new Map();
+    for (const leaf of this.app.workspace.getLeavesOfType("graph")) {
+      const view = asGraphView(leaf);
+      const renderer = view == null ? void 0 : view.renderer;
+      if (view === void 0 || renderer === void 0) continue;
+      if (typeof renderer.setData !== "function") continue;
+      openGraphs.set(renderer, view);
+    }
+    for (const [renderer, patch] of this.patches) {
+      if (!openGraphs.has(renderer)) this.releasePatch(patch, false);
+    }
+    const addedPatches = [];
+    for (const [renderer, view] of openGraphs) {
+      if (this.patches.has(renderer)) continue;
+      const patch = createRendererPatch(view, renderer, this.getTopologyDegree);
+      renderer.setData = patch.wrapper;
+      this.patches.set(renderer, patch);
+      addedPatches.push(patch);
+    }
+    return addedPatches;
+  }
+  releasePatch(patch, refresh) {
+    patch.deactivate();
+    if (patch.renderer.setData === patch.wrapper) {
+      patch.renderer.setData = patch.originalSetData;
+    }
+    this.patches.delete(patch.renderer);
+    if (refresh) refreshView(patch.view);
   }
 };
 
@@ -312,10 +335,8 @@ var FolderVirtualLinksSettingTab = class extends import_obsidian.PluginSettingTa
   }
   display() {
     this.containerEl.empty();
-    new import_obsidian.Setting(this.containerEl).setName("Folder topology degree").setDesc(
-      "3 is the balanced default. 4 adds a stronger folder pull. Native link strength and distance apply to both real and virtual links."
-    ).addDropdown((dropdown) => {
-      dropdown.addOption("3", "3 (balanced)").addOption("4", "4 (stronger)").setValue(String(this.plugin.settings.topologyDegree)).onChange(async (value) => {
+    new import_obsidian.Setting(this.containerEl).setName("Folder topology degree").setDesc("Higher values pull notes in the same folder closer.").addDropdown((dropdown) => {
+      dropdown.addOption("3", "3 (default)").addOption("4", "4 (strong)").setValue(String(this.plugin.settings.topologyDegree)).onChange(async (value) => {
         const topologyDegree = value === "4" ? 4 : 3;
         await this.plugin.updateTopologyDegree(topologyDegree);
       });
@@ -334,7 +355,10 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     this.isActive = true;
     await this.loadSettings();
-    this.bridge = new NativeGraphBridge(this.app, () => this.settings.topologyDegree);
+    this.bridge = new NativeGraphBridge(
+      this.app,
+      () => this.settings.topologyDegree
+    );
     this.addSettingTab(new FolderVirtualLinksSettingTab(this.app, this));
     this.addCommand({
       id: "rebuild-folder-virtual-links",
@@ -344,10 +368,15 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
         return (_a = this.bridge) == null ? void 0 : _a.refreshAll();
       }
     });
-    this.registerEvent(this.app.workspace.on("layout-change", () => {
-      var _a;
-      return (_a = this.bridge) == null ? void 0 : _a.patchOpenGraphs();
-    }));
+    this.registerEvent(
+      this.app.workspace.on(
+        "layout-change",
+        () => {
+          var _a;
+          return (_a = this.bridge) == null ? void 0 : _a.patchOpenGraphs();
+        }
+      )
+    );
     this.app.workspace.onLayoutReady(() => {
       var _a;
       if (this.isActive) (_a = this.bridge) == null ? void 0 : _a.patchOpenGraphs();

@@ -12,9 +12,9 @@ function graphData(): GraphDataLike {
       "A/four.md": { type: "", links: {} },
       "B/one.md": { type: "", links: {} },
       "B/two.md": { type: "", links: {} },
-      "#tag": { type: "tag", links: {} }
+      "#tag": { type: "tag", links: {} },
     },
-    numLinks: 1
+    numLinks: 1,
   };
 }
 
@@ -27,7 +27,9 @@ describe("graph data augmentation", () => {
     expect(original).toEqual(before);
     expect(result.data.numLinks).toBeGreaterThan(original.numLinks);
     expect(result.data.nodes["#tag"]?.links).toEqual({});
-    expect(result.virtualEdgeKeys.has(edgeKey("A/one.md", "A/two.md"))).toBe(false);
+    expect(result.virtualEdgeKeys.has(edgeKey("A/one.md", "A/two.md"))).toBe(
+      false,
+    );
 
     for (const key of result.virtualEdgeKeys) {
       const [source, target] = key.split("\u0000") as [string, string];
@@ -39,9 +41,9 @@ describe("graph data augmentation", () => {
     const original: GraphDataLike = {
       nodes: {
         "one.md": { type: "", links: {} },
-        "#tag": { type: "tag", links: {} }
+        "#tag": { type: "tag", links: {} },
       },
-      numLinks: 0
+      numLinks: 0,
     };
     expect(augmentGraphData(original, 3).data).toBe(original);
   });
