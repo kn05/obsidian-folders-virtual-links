@@ -1,11 +1,12 @@
 # Folder Virtual Links
 
 Folder Virtual Links groups notes by folder in Obsidian's global graph. It adds
-deterministic virtual links to the graph simulation without changing notes or
-metadata.
+deterministic virtual links to the graph simulation and draws each folder's
+area without changing notes or metadata.
 
 Virtual links are not drawn and do not appear in hover relationships. Obsidian
-still controls rendering, dragging, pan and zoom, filters, colors, and animation.
+still controls node and link rendering, dragging, pan and zoom, filters, colors,
+and animation.
 
 ## How it clusters
 
@@ -23,6 +24,16 @@ Virtual springs use Obsidian's current global link distance and link strength.
 The worker has no per-link spring setting. The topology degree controls the added
 attraction.
 
+## Folder contours
+
+Each visible folder group receives a deterministic color, translucent fill,
+border, and path label. A padded convex hull follows the live node positions: a
+single note produces a circle, two notes produce a capsule, and larger groups
+produce a rounded outline. The contour layer shares the native graph's world
+transform, so it follows animation, dragging, pan, and zoom. See
+[ADR 0003](docs/decisions/0003-native-folder-contours.md) for the rendering
+decision and tradeoffs.
+
 ## Install with BRAT
 
 1. Install and enable BRAT.
@@ -36,6 +47,7 @@ Under **Settings > Folder Virtual Links**:
 - **Folder topology degree** chooses degree 3 or 4.
 - **Folder grouping depth** keeps direct parents separate or groups notes at a
   selected ancestor depth.
+- **Show folder contours** toggles the labeled folder-area overlay.
 - **Excluded folders** opens a searchable folder picker. Each selected folder
   and all of its subfolders are ignored.
 
@@ -46,15 +58,17 @@ current settings manually.
 
 - Vault files and note contents are never read or written by the plugin.
 - The metadata cache and backlink index are not modified.
-- Only markdown nodes already selected by the native global graph are clustered.
+- Only markdown nodes already selected by the native global graph are clustered
+  and outlined.
 - Folder membership follows the selected grouping depth and exclusions.
-- Local graph views and folder contours are not changed.
+- Local graph views are not changed.
 
 ## Compatibility
 
 Obsidian has no public graph renderer API. This plugin uses a guarded integration
-with the native renderer. If the renderer interface changes, the plugin leaves
-the native graph data unchanged.
+with the native renderer. If the contour interface changes, virtual-link
+clustering continues without contours. If the data interface changes, the
+plugin leaves the native graph data unchanged.
 
 ## Development
 

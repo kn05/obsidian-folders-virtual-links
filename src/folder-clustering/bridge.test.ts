@@ -13,6 +13,7 @@ import type {
 const DEFAULT_TEST_SETTINGS: FolderVirtualLinksSettings = {
   excludedFolders: [],
   folderDepth: "direct",
+  showFolderContours: true,
   topologyDegree: 3,
 };
 
@@ -188,5 +189,49 @@ describe("native graph bridge", () => {
     bridge.refreshAll();
 
     expect(update).toHaveBeenCalledOnce();
+  });
+
+  it("wraps and restores the native render callback", () => {
+    const originalRenderCallback = vi.fn();
+    const data: GraphDataLike = {
+      nodes: {
+        "folder/a.md": { type: "", links: {} },
+        "folder/b.md": { type: "", links: {} },
+      },
+      numLinks: 0,
+    };
+    const renderer: GraphRendererLike = {
+      links: [],
+      nodes: [],
+      renderCallback: originalRenderCallback,
+      setData(next) {
+        this.nodes = Object.keys(next.nodes).map((id, index) => ({
+          id,
+          rendered: true,
+          weight: 0,
+          x: index * 100,
+          y: 0,
+        }));
+      },
+    };
+    const view: GraphViewLike = { renderer };
+    view.update = () => renderer.setData(data);
+    const leaf = { view: { getViewType: () => "graph", ...view } };
+    const app = {
+      workspace: { getLeavesOfType: () => [leaf] },
+    };
+    const bridge = new NativeGraphBridge(
+      app as never,
+      () => DEFAULT_TEST_SETTINGS,
+    );
+
+    bridge.patchOpenGraphs();
+
+    expect(renderer.renderCallback).not.toBe(originalRenderCallback);
+    renderer.renderCallback?.();
+    expect(originalRenderCallback).toHaveBeenCalledOnce();
+
+    bridge.dispose();
+    expect(renderer.renderCallback).toBe(originalRenderCallback);
   });
 });

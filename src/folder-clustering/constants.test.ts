@@ -6,6 +6,7 @@ describe("folder clustering settings", () => {
     expect(normalizeSettings({ topologyDegree: 4 })).toEqual({
       excludedFolders: [],
       folderDepth: "direct",
+      showFolderContours: true,
       topologyDegree: 4,
     });
   });
@@ -28,11 +29,13 @@ describe("folder clustering settings", () => {
       normalizeSettings({
         excludedFolders: ["/Archive/old/", "Archive", "Work", "Work", 42],
         folderDepth: 2,
+        showFolderContours: false,
         topologyDegree: 3,
       }),
     ).toEqual({
       excludedFolders: ["Archive", "Work"],
       folderDepth: 2,
+      showFolderContours: false,
       topologyDegree: 3,
     });
   });

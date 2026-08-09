@@ -1,4 +1,5 @@
 import type { App, WorkspaceLeaf } from "obsidian";
+import { FolderContourLayer } from "./contours";
 import { augmentGraphData } from "./graph-data";
 import { edgeKey } from "./topology";
 import type {
@@ -10,7 +11,9 @@ import type {
 
 interface RendererPatch {
   deactivate: () => void;
+  originalRenderCallback: GraphRendererLike["renderCallback"];
   originalSetData: GraphRendererLike["setData"];
+  renderWrapper: GraphRendererLike["renderCallback"];
   renderer: GraphRendererLike;
   view: GraphViewLike;
   wrapper: GraphRendererLike["setData"];
@@ -90,27 +93,87 @@ function createRendererPatch(
   getSettings: () => Readonly<FolderVirtualLinksSettings>,
 ): RendererPatch {
   const originalSetData = renderer.setData;
+  const originalRenderCallback = renderer.renderCallback;
   let active = true;
+  let contourLayer: FolderContourLayer | undefined;
+  let contoursCompatible = typeof originalRenderCallback === "function";
+
+  const clearContours = () => {
+    try {
+      contourLayer?.dispose();
+    } catch (error) {
+      console.warn("Folder Virtual Links could not remove contours", error);
+    }
+    contourLayer = undefined;
+  };
+
+  const replaceContours = (
+    groups: ReadonlyMap<string, readonly string[]>,
+    enabled: boolean,
+  ) => {
+    clearContours();
+    if (!active || !enabled || !contoursCompatible) return;
+
+    try {
+      contourLayer = FolderContourLayer.create(renderer);
+      if (contourLayer === undefined) {
+        contoursCompatible = false;
+        return;
+      }
+      contourLayer.setGroups(groups);
+      contourLayer.update();
+    } catch (error) {
+      contoursCompatible = false;
+      clearContours();
+      console.warn("Folder Virtual Links could not draw contours", error);
+    }
+  };
 
   const wrapper: GraphRendererLike["setData"] = (data) => {
     if (!active) return originalSetData.call(renderer, data);
 
     try {
-      const augmented = augmentGraphData(data, getSettings());
+      const settings = getSettings();
+      const augmented = augmentGraphData(data, settings);
+      clearContours();
       const result = originalSetData.call(renderer, augmented.data);
       stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
+      replaceContours(augmented.folderGroups, settings.showFolderContours);
       return result;
     } catch (error) {
       console.error("Folder Virtual Links could not update the graph", error);
+      clearContours();
       return originalSetData.call(renderer, data);
     }
   };
 
+  const renderWrapper: GraphRendererLike["renderCallback"] =
+    originalRenderCallback === undefined
+      ? undefined
+      : () => {
+          if (active && contourLayer !== undefined) {
+            try {
+              contourLayer.update();
+            } catch (error) {
+              contoursCompatible = false;
+              clearContours();
+              console.warn(
+                "Folder Virtual Links stopped updating contours",
+                error,
+              );
+            }
+          }
+          return originalRenderCallback.call(renderer);
+        };
+
   return {
     deactivate: () => {
       active = false;
+      clearContours();
     },
+    originalRenderCallback,
     originalSetData,
+    renderWrapper,
     renderer,
     view,
     wrapper,
@@ -165,6 +228,9 @@ export class NativeGraphBridge {
 
       const patch = createRendererPatch(view, renderer, this.getSettings);
       renderer.setData = patch.wrapper;
+      if (patch.renderWrapper !== undefined) {
+        renderer.renderCallback = patch.renderWrapper;
+      }
       this.patches.set(renderer, patch);
       addedPatches.push(patch);
     }
@@ -175,6 +241,9 @@ export class NativeGraphBridge {
     patch.deactivate();
     if (patch.renderer.setData === patch.wrapper) {
       patch.renderer.setData = patch.originalSetData;
+    }
+    if (patch.renderer.renderCallback === patch.renderWrapper) {
+      patch.renderer.renderCallback = patch.originalRenderCallback;
     }
     this.patches.delete(patch.renderer);
     if (refresh) refreshView(patch.view);

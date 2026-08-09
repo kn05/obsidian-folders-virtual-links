@@ -55,6 +55,10 @@ export default class FolderVirtualLinksPlugin extends Plugin {
     await this.updateSettings({ folderDepth });
   }
 
+  async updateShowFolderContours(showFolderContours: boolean): Promise<void> {
+    await this.updateSettings({ showFolderContours });
+  }
+
   async addExcludedFolder(folderPath: string): Promise<void> {
     await this.updateSettings({
       excludedFolders: [...this.settings.excludedFolders, folderPath],

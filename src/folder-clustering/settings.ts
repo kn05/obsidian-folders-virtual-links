@@ -117,6 +117,19 @@ export class FolderVirtualLinksSettingTab extends PluginSettingTab {
       });
 
     new Setting(this.containerEl)
+      .setName("Show folder contours")
+      .setDesc(
+        "Draw a labeled, translucent area around each visible folder group.",
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.showFolderContours)
+          .onChange(async (value) => {
+            await this.plugin.updateShowFolderContours(value);
+          });
+      });
+
+    new Setting(this.containerEl)
       .setName("Excluded folders")
       .setDesc("Ignore selected folders and all their subfolders.")
       .addButton((button) => {

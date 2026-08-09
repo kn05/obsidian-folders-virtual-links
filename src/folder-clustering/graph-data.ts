@@ -8,6 +8,7 @@ import type {
 
 export interface AugmentedGraphData {
   data: GraphDataLike;
+  folderGroups: Map<string, string[]>;
   virtualEdgeKeys: Set<string>;
 }
 
@@ -32,7 +33,7 @@ export function isFolderExcluded(
   );
 }
 
-function markdownFolders(
+export function visibleFolderGroups(
   nodes: Readonly<Record<string, GraphNodeDataLike>>,
   settings: Readonly<FolderVirtualLinksSettings>,
 ): Map<string, string[]> {
@@ -45,7 +46,9 @@ function markdownFolders(
     members.push(path);
     folders.set(folder, members);
   }
-  return folders;
+  return new Map(
+    [...folders].sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 function hasLink(data: GraphDataLike, source: string, target: string): boolean {
@@ -64,9 +67,7 @@ export function augmentGraphData(
   const virtualEdgeKeys = new Set<string>();
   let addedLinks = 0;
 
-  const folders = [...markdownFolders(original.nodes, settings)].sort(
-    ([left], [right]) => left.localeCompare(right),
-  );
+  const folders = visibleFolderGroups(original.nodes, settings);
 
   for (const [folder, members] of folders) {
     for (const edge of buildFolderTopology(
@@ -97,6 +98,7 @@ export function augmentGraphData(
       addedLinks === 0
         ? original
         : { ...original, nodes, numLinks: original.numLinks + addedLinks },
+    folderGroups: folders,
     virtualEdgeKeys,
   };
 }

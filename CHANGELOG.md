@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-08-09
+
+- Add deterministic, labeled folder contours to the native global graph.
+- Follow native graph animation, dragging, pan, zoom, filters, folder depth, and
+  exclusions without a separate animation loop.
+- Add a setting to show or hide contours independently of virtual links.
+
 ## 0.2.0 - 2026-08-09
 
 - Add configurable direct-parent or numeric-depth folder grouping.

@@ -1,4 +1,5 @@
 import { TOPOLOGY_ATTEMPTS } from "./constants";
+import { stableHash32 } from "./hash";
 import type { TopologyDegree, VirtualEdge } from "./types";
 
 const EDGE_SEPARATOR = "\u0000";
@@ -9,17 +10,9 @@ export function edgeKey(left: string, right: string): string {
     : `${right}${EDGE_SEPARATOR}${left}`;
 }
 
-function hash32(input: string): number {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
 function compareBySalt(left: string, right: string, salt: string): number {
-  const hashDifference = hash32(`${salt}:${left}`) - hash32(`${salt}:${right}`);
+  const hashDifference =
+    stableHash32(`${salt}:${left}`) - stableHash32(`${salt}:${right}`);
   return hashDifference || left.localeCompare(right);
 }
 
@@ -137,7 +130,9 @@ export function buildFolderTopology(
   const stubs = makeStubs(paths, adjacency, targetDegree, parityNode);
 
   for (let attempt = 0; attempt < TOPOLOGY_ATTEMPTS; attempt += 1) {
-    const attemptSeed = hash32(`${folderSeed}:matching:${String(attempt)}`);
+    const attemptSeed = stableHash32(
+      `${folderSeed}:matching:${String(attempt)}`,
+    );
     const stubEdges = tryBuildStubEdges(adjacency, stubs, attemptSeed);
     if (stubEdges !== undefined) return edges.concat(stubEdges);
   }

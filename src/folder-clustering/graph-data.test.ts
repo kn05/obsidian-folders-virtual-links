@@ -11,6 +11,7 @@ import type { FolderVirtualLinksSettings, GraphDataLike } from "./types";
 const DEFAULT_TEST_SETTINGS: FolderVirtualLinksSettings = {
   excludedFolders: [],
   folderDepth: "direct",
+  showFolderContours: true,
   topologyDegree: 3,
 };
 
@@ -56,9 +57,9 @@ describe("graph data augmentation", () => {
       },
       numLinks: 0,
     };
-    expect(augmentGraphData(original, DEFAULT_TEST_SETTINGS).data).toBe(
-      original,
-    );
+    const result = augmentGraphData(original, DEFAULT_TEST_SETTINGS);
+    expect(result.data).toBe(original);
+    expect(result.folderGroups).toEqual(new Map([["", ["one.md"]]]));
   });
 
   it("extracts direct parents including the root", () => {
@@ -117,6 +118,9 @@ describe("graph data augmentation", () => {
     expect(isFolderExcluded("A/private-note.md", ["A/private"])).toBe(false);
     expect(result.virtualEdgeKeys).toEqual(
       new Set([edgeKey("A/one.md", "A/B/two.md")]),
+    );
+    expect(result.folderGroups).toEqual(
+      new Map([["A", ["A/one.md", "A/B/two.md"]]]),
     );
   });
 });

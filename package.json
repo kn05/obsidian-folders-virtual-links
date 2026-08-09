@@ -1,7 +1,7 @@
 {
   "name": "obsidian-folders-virtual-links",
-  "version": "0.2.0",
-  "description": "Invisible folder-clustering links for Obsidian's native graph view.",
+  "version": "0.3.0",
+  "description": "Folder clustering links and contours for Obsidian's native graph view.",
   "main": "main.js",
   "type": "module",
   "scripts": {

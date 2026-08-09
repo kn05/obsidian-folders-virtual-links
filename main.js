@@ -27,10 +27,307 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
 
+// src/folder-clustering/contour-geometry.ts
+function cross(origin, left, right) {
+  return (left.x - origin.x) * (right.y - origin.y) - (left.y - origin.y) * (right.x - origin.x);
+}
+function uniqueFinitePoints(points) {
+  const result = /* @__PURE__ */ new Map();
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    result.set(`${String(point.x)}\0${String(point.y)}`, point);
+  }
+  return [...result.values()];
+}
+function convexHull(points) {
+  const sorted = uniqueFinitePoints(points).sort(
+    (left, right) => left.x - right.x || left.y - right.y
+  );
+  if (sorted.length <= 1) return sorted;
+  const lower = [];
+  for (const point of sorted) {
+    while (lower.length >= 2) {
+      const origin = lower.at(-2);
+      const left = lower.at(-1);
+      if (origin === void 0 || left === void 0) break;
+      if (cross(origin, left, point) > 0) break;
+      lower.pop();
+    }
+    lower.push(point);
+  }
+  const upper = [];
+  for (const point of [...sorted].reverse()) {
+    while (upper.length >= 2) {
+      const origin = upper.at(-2);
+      const left = upper.at(-1);
+      if (origin === void 0 || left === void 0) break;
+      if (cross(origin, left, point) > 0) break;
+      upper.pop();
+    }
+    upper.push(point);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+function paddedConvexHull(points, padding, circleSamples) {
+  const hull = convexHull(points);
+  if (hull.length === 0) return [];
+  if (padding <= 0 || circleSamples < 3) return hull;
+  const expanded = [];
+  for (const point of hull) {
+    for (let sample = 0; sample < circleSamples; sample += 1) {
+      const angle = sample / circleSamples * Math.PI * 2;
+      expanded.push({
+        x: point.x + Math.cos(angle) * padding,
+        y: point.y + Math.sin(angle) * padding
+      });
+    }
+  }
+  return convexHull(expanded);
+}
+
+// src/folder-clustering/hash.ts
+function stableHash32(input) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+// src/folder-clustering/contours.ts
+var CONTOUR_PADDING = 36;
+var CONTOUR_CIRCLE_SAMPLES = 24;
+var CONTOUR_BORDER_WIDTH = 2;
+var CONTOUR_BORDER_ALPHA = 0.5;
+var CONTOUR_FILL_ALPHA = 0.09;
+var CONTOUR_LABEL_OFFSET = 7;
+var ROOT_FOLDER_LABEL = "Vault root";
+function hueChannel(value, middle, low) {
+  let hue = value;
+  if (hue < 0) hue += 1;
+  if (hue > 1) hue -= 1;
+  if (hue < 1 / 6) return low + (middle - low) * 6 * hue;
+  if (hue < 1 / 2) return middle;
+  if (hue < 2 / 3) return low + (middle - low) * (2 / 3 - hue) * 6;
+  return low;
+}
+function hslToRgb(hueDegrees, saturation, lightness) {
+  const hue = hueDegrees / 360;
+  const middle = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+  const low = 2 * lightness - middle;
+  return [
+    hueChannel(hue + 1 / 3, middle, low),
+    hueChannel(hue, middle, low),
+    hueChannel(hue - 1 / 3, middle, low)
+  ].map((channel) => Math.round(channel * 255));
+}
+function folderContourColor(folder) {
+  const hue = stableHash32(folder || "<root>") % 360;
+  const [red = 0, green = 0, blue = 0] = hslToRgb(hue, 0.7, 0.6);
+  return red << 16 | green << 8 | blue;
+}
+function canRenderContours(renderer) {
+  const hanger = renderer.hanger;
+  return hanger !== void 0 && typeof hanger.addChildAt === "function" && typeof hanger.removeChild === "function";
+}
+function constructorOf(value) {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function")
+    return void 0;
+  const constructor = Reflect.get(value, "constructor");
+  return typeof constructor === "function" ? constructor : void 0;
+}
+function rendererNodes(renderer) {
+  var _a, _b;
+  return (_b = renderer.nodes) != null ? _b : Object.values((_a = renderer.nodeLookup) != null ? _a : {});
+}
+function contourFactories(renderer) {
+  var _a, _b;
+  const nodes = rendererNodes(renderer);
+  const circle = (_a = nodes.find((node) => node.circle != null)) == null ? void 0 : _a.circle;
+  const text = (_b = nodes.find((node) => node.text != null)) == null ? void 0 : _b.text;
+  const ContainerClass = constructorOf(renderer.hanger);
+  const GraphicsClass = constructorOf(circle);
+  const TextClass = constructorOf(text);
+  return ContainerClass === void 0 || GraphicsClass === void 0 || TextClass === void 0 ? void 0 : { Container: ContainerClass, Graphics: GraphicsClass, Text: TextClass };
+}
+function samePoints(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((point, index) => {
+    const other = right[index];
+    if (other === void 0) return false;
+    return point.x === other.x && point.y === other.y;
+  });
+}
+function drawClosedPolygon(graphics, points) {
+  const first = points[0];
+  if (first === void 0) return;
+  graphics.moveTo(first.x, first.y);
+  for (const point of points.slice(1)) graphics.lineTo(point.x, point.y);
+  graphics.closePath();
+}
+function pointBounds(points) {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  for (const point of points) {
+    left = Math.min(left, point.x);
+    top = Math.min(top, point.y);
+  }
+  return { left, top };
+}
+function folderLabel(folder) {
+  return folder || ROOT_FOLDER_LABEL;
+}
+function createFolderContour(factories, folder, nodeIds) {
+  const color = folderContourColor(folder);
+  const graphics = new factories.Graphics();
+  graphics.eventMode = "none";
+  const label = new factories.Text(folderLabel(folder), {
+    fill: color,
+    fontFamily: "sans-serif",
+    fontSize: 18,
+    fontWeight: "600"
+  });
+  label.alpha = 0.9;
+  label.anchor.set(0, 1);
+  label.eventMode = "none";
+  label.resolution = 2;
+  label.visible = false;
+  return { graphics, label, nodeIds };
+}
+function destroyContour(contour) {
+  contour.graphics.removeFromParent();
+  contour.graphics.destroy();
+  contour.label.removeFromParent();
+  contour.label.destroy();
+}
+var FolderContourLayer = class _FolderContourLayer {
+  constructor(renderer) {
+    __publicField(this, "renderer", renderer);
+    __publicField(this, "container");
+    __publicField(this, "contours", /* @__PURE__ */ new Map());
+    __publicField(this, "factories");
+    __publicField(this, "groups", /* @__PURE__ */ new Map());
+    __publicField(this, "disposed", false);
+  }
+  static create(renderer) {
+    return canRenderContours(renderer) ? new _FolderContourLayer(renderer) : void 0;
+  }
+  setGroups(groups) {
+    if (this.disposed) return;
+    this.groups = new Map(groups);
+    if (this.container !== void 0) this.syncContours();
+  }
+  update() {
+    var _a, _b;
+    if (this.disposed || !this.initializeIfReady()) return;
+    this.attach();
+    const nodeLookup = (_b = this.renderer.nodeLookup) != null ? _b : Object.fromEntries(
+      ((_a = this.renderer.nodes) != null ? _a : []).map((node) => [node.id, node])
+    );
+    for (const [folder, contour] of this.contours) {
+      const points = contour.nodeIds.flatMap((nodeId) => {
+        const node = nodeLookup[nodeId];
+        return typeof (node == null ? void 0 : node.x) === "number" && typeof node.y === "number" && Number.isFinite(node.x) && Number.isFinite(node.y) ? [{ x: node.x, y: node.y }] : [];
+      });
+      if (contour.lastPoints !== void 0 && samePoints(contour.lastPoints, points))
+        continue;
+      contour.lastPoints = points;
+      this.drawContour(folder, contour, points);
+    }
+  }
+  dispose() {
+    var _a, _b;
+    if (this.disposed) return;
+    this.disposed = true;
+    (_a = this.container) == null ? void 0 : _a.removeFromParent();
+    (_b = this.container) == null ? void 0 : _b.destroy({ children: true });
+    this.container = void 0;
+    this.factories = void 0;
+    this.contours.clear();
+  }
+  initializeIfReady() {
+    var _a;
+    if (((_a = this.container) == null ? void 0 : _a.destroyed) === true) {
+      this.container = void 0;
+      this.factories = void 0;
+      this.contours.clear();
+    }
+    if (this.container !== void 0) return true;
+    const factories = contourFactories(this.renderer);
+    if (factories === void 0) return false;
+    this.factories = factories;
+    this.container = new factories.Container();
+    this.container.name = "Folder Virtual Links contours";
+    this.container.eventMode = "none";
+    this.syncContours();
+    return true;
+  }
+  syncContours() {
+    const container = this.container;
+    const factories = this.factories;
+    if (container === void 0 || factories === void 0) return;
+    for (const [folder, contour] of this.contours) {
+      if (this.groups.has(folder)) continue;
+      destroyContour(contour);
+      this.contours.delete(folder);
+    }
+    for (const [folder, nodeIds] of this.groups) {
+      const current = this.contours.get(folder);
+      if (current !== void 0) {
+        current.nodeIds = [...nodeIds];
+        current.lastPoints = void 0;
+        continue;
+      }
+      const contour = createFolderContour(factories, folder, [...nodeIds]);
+      this.contours.set(folder, contour);
+      container.addChild(contour.graphics, contour.label);
+    }
+    this.attach();
+  }
+  attach() {
+    const container = this.container;
+    if (container === void 0 || container.parent === this.renderer.hanger)
+      return;
+    this.renderer.hanger.addChildAt(container, 0);
+  }
+  drawContour(folder, contour, points) {
+    contour.graphics.clear();
+    const hull = paddedConvexHull(
+      points,
+      CONTOUR_PADDING,
+      CONTOUR_CIRCLE_SAMPLES
+    );
+    if (hull.length < 3) {
+      contour.label.visible = false;
+      return;
+    }
+    const color = folderContourColor(folder);
+    contour.graphics.lineStyle(
+      CONTOUR_BORDER_WIDTH,
+      color,
+      CONTOUR_BORDER_ALPHA,
+      0.5
+    );
+    contour.graphics.beginFill(color, CONTOUR_FILL_ALPHA);
+    drawClosedPolygon(contour.graphics, hull);
+    contour.graphics.endFill();
+    const bounds = pointBounds(hull);
+    contour.label.position.set(
+      bounds.left + CONTOUR_LABEL_OFFSET,
+      bounds.top - CONTOUR_LABEL_OFFSET
+    );
+    contour.label.visible = true;
+  }
+};
+
 // src/folder-clustering/constants.ts
 var DEFAULT_SETTINGS = {
   excludedFolders: [],
   folderDepth: "direct",
+  showFolderContours: true,
   topologyDegree: 3
 };
 var TOPOLOGY_ATTEMPTS = 512;
@@ -64,6 +361,7 @@ function normalizeSettings(stored) {
   return {
     excludedFolders: normalizeExcludedFolders(stored.excludedFolders),
     folderDepth: normalizeFolderDepth(stored.folderDepth),
+    showFolderContours: typeof stored.showFolderContours === "boolean" ? stored.showFolderContours : DEFAULT_SETTINGS.showFolderContours,
     topologyDegree: normalizeTopologyDegree(stored.topologyDegree)
   };
 }
@@ -73,16 +371,8 @@ var EDGE_SEPARATOR = "\0";
 function edgeKey(left, right) {
   return left < right ? `${left}${EDGE_SEPARATOR}${right}` : `${right}${EDGE_SEPARATOR}${left}`;
 }
-function hash32(input) {
-  let hash = 2166136261;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
 function compareBySalt(left, right, salt) {
-  const hashDifference = hash32(`${salt}:${left}`) - hash32(`${salt}:${right}`);
+  const hashDifference = stableHash32(`${salt}:${left}`) - stableHash32(`${salt}:${right}`);
   return hashDifference || left.localeCompare(right);
 }
 function createRandom(seed) {
@@ -170,7 +460,9 @@ function buildFolderTopology(memberPaths, requestedDegree, folderSeed) {
   const parityNode = needsParityNode ? paths[0] : void 0;
   const stubs = makeStubs(paths, adjacency, targetDegree, parityNode);
   for (let attempt = 0; attempt < TOPOLOGY_ATTEMPTS; attempt += 1) {
-    const attemptSeed = hash32(`${folderSeed}:matching:${String(attempt)}`);
+    const attemptSeed = stableHash32(
+      `${folderSeed}:matching:${String(attempt)}`
+    );
     const stubEdges = tryBuildStubEdges(adjacency, stubs, attemptSeed);
     if (stubEdges !== void 0) return edges.concat(stubEdges);
   }
@@ -193,7 +485,7 @@ function isFolderExcluded(path, excludedFolders) {
     (folder) => parent === folder || parent.startsWith(`${folder}/`)
   );
 }
-function markdownFolders(nodes, settings) {
+function visibleFolderGroups(nodes, settings) {
   var _a;
   const folders = /* @__PURE__ */ new Map();
   for (const [path, node] of Object.entries(nodes)) {
@@ -204,7 +496,9 @@ function markdownFolders(nodes, settings) {
     members.push(path);
     folders.set(folder, members);
   }
-  return folders;
+  return new Map(
+    [...folders].sort(([left], [right]) => left.localeCompare(right))
+  );
 }
 function hasLink(data, source, target) {
   var _a, _b;
@@ -215,9 +509,7 @@ function augmentGraphData(original, settings) {
   const clonedSources = /* @__PURE__ */ new Set();
   const virtualEdgeKeys = /* @__PURE__ */ new Set();
   let addedLinks = 0;
-  const folders = [...markdownFolders(original.nodes, settings)].sort(
-    ([left], [right]) => left.localeCompare(right)
-  );
+  const folders = visibleFolderGroups(original.nodes, settings);
   for (const [folder, members] of folders) {
     for (const edge of buildFolderTopology(
       members,
@@ -241,6 +533,7 @@ function augmentGraphData(original, settings) {
   }
   return {
     data: addedLinks === 0 ? original : { ...original, nodes, numLinks: original.numLinks + addedLinks },
+    folderGroups: folders,
     virtualEdgeKeys
   };
 }
@@ -296,24 +589,74 @@ function refreshView(view) {
 }
 function createRendererPatch(view, renderer, getSettings) {
   const originalSetData = renderer.setData;
+  const originalRenderCallback = renderer.renderCallback;
   let active = true;
+  let contourLayer;
+  let contoursCompatible = typeof originalRenderCallback === "function";
+  const clearContours = () => {
+    try {
+      contourLayer == null ? void 0 : contourLayer.dispose();
+    } catch (error) {
+      console.warn("Folder Virtual Links could not remove contours", error);
+    }
+    contourLayer = void 0;
+  };
+  const replaceContours = (groups, enabled) => {
+    clearContours();
+    if (!active || !enabled || !contoursCompatible) return;
+    try {
+      contourLayer = FolderContourLayer.create(renderer);
+      if (contourLayer === void 0) {
+        contoursCompatible = false;
+        return;
+      }
+      contourLayer.setGroups(groups);
+      contourLayer.update();
+    } catch (error) {
+      contoursCompatible = false;
+      clearContours();
+      console.warn("Folder Virtual Links could not draw contours", error);
+    }
+  };
   const wrapper = (data) => {
     if (!active) return originalSetData.call(renderer, data);
     try {
-      const augmented = augmentGraphData(data, getSettings());
+      const settings = getSettings();
+      const augmented = augmentGraphData(data, settings);
+      clearContours();
       const result = originalSetData.call(renderer, augmented.data);
       stripVirtualLinks(renderer, augmented.virtualEdgeKeys);
+      replaceContours(augmented.folderGroups, settings.showFolderContours);
       return result;
     } catch (error) {
       console.error("Folder Virtual Links could not update the graph", error);
+      clearContours();
       return originalSetData.call(renderer, data);
     }
+  };
+  const renderWrapper = originalRenderCallback === void 0 ? void 0 : () => {
+    if (active && contourLayer !== void 0) {
+      try {
+        contourLayer.update();
+      } catch (error) {
+        contoursCompatible = false;
+        clearContours();
+        console.warn(
+          "Folder Virtual Links stopped updating contours",
+          error
+        );
+      }
+    }
+    return originalRenderCallback.call(renderer);
   };
   return {
     deactivate: () => {
       active = false;
+      clearContours();
     },
+    originalRenderCallback,
     originalSetData,
+    renderWrapper,
     renderer,
     view,
     wrapper
@@ -358,6 +701,9 @@ var NativeGraphBridge = class {
       if (this.patches.has(renderer)) continue;
       const patch = createRendererPatch(view, renderer, this.getSettings);
       renderer.setData = patch.wrapper;
+      if (patch.renderWrapper !== void 0) {
+        renderer.renderCallback = patch.renderWrapper;
+      }
       this.patches.set(renderer, patch);
       addedPatches.push(patch);
     }
@@ -367,6 +713,9 @@ var NativeGraphBridge = class {
     patch.deactivate();
     if (patch.renderer.setData === patch.wrapper) {
       patch.renderer.setData = patch.originalSetData;
+    }
+    if (patch.renderer.renderCallback === patch.renderWrapper) {
+      patch.renderer.renderCallback = patch.originalRenderCallback;
     }
     this.patches.delete(patch.renderer);
     if (refresh) refreshView(patch.view);
@@ -445,6 +794,13 @@ var FolderVirtualLinksSettingTab = class extends import_obsidian.PluginSettingTa
         await this.plugin.updateFolderDepth(folderDepth);
       });
     });
+    new import_obsidian.Setting(this.containerEl).setName("Show folder contours").setDesc(
+      "Draw a labeled, translucent area around each visible folder group."
+    ).addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.showFolderContours).onChange(async (value) => {
+        await this.plugin.updateShowFolderContours(value);
+      });
+    });
     new import_obsidian.Setting(this.containerEl).setName("Excluded folders").setDesc("Ignore selected folders and all their subfolders.").addButton((button) => {
       button.setButtonText("Add folder").onClick(() => {
         const availableFolders = folderPaths.filter(
@@ -520,6 +876,9 @@ var FolderVirtualLinksPlugin = class extends import_obsidian2.Plugin {
   }
   async updateFolderDepth(folderDepth) {
     await this.updateSettings({ folderDepth });
+  }
+  async updateShowFolderContours(showFolderContours) {
+    await this.updateSettings({ showFolderContours });
   }
   async addExcludedFolder(folderPath) {
     await this.updateSettings({

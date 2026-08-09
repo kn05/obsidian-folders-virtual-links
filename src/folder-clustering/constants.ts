@@ -8,6 +8,7 @@ export const PLUGIN_ID = "folder-virtual-links";
 export const DEFAULT_SETTINGS: FolderVirtualLinksSettings = {
   excludedFolders: [],
   folderDepth: "direct",
+  showFolderContours: true,
   topologyDegree: 3,
 };
 
@@ -62,6 +63,10 @@ export function normalizeSettings(stored: unknown): FolderVirtualLinksSettings {
   return {
     excludedFolders: normalizeExcludedFolders(stored.excludedFolders),
     folderDepth: normalizeFolderDepth(stored.folderDepth),
+    showFolderContours:
+      typeof stored.showFolderContours === "boolean"
+        ? stored.showFolderContours
+        : DEFAULT_SETTINGS.showFolderContours,
     topologyDegree: normalizeTopologyDegree(stored.topologyDegree),
   };
 }
